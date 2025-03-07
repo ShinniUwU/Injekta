@@ -41,7 +41,7 @@
 1. **Clone the Repository:**
 
    ```bash
-   git clone https://github.com/yourusername/injekta.git
+   git clone https://github.com/ShinniUwU/injekta.git
    cd injekta
    ```
 
