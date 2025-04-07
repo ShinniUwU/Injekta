@@ -126,6 +126,8 @@ DESIGNATED_CHANNEL_ID=your_discord_channel_id  # ID of the channel for reminders
 BOT_OWNER_ID=your_discord_user_id              # Optional: Your Discord user ID for potential owner-specific checks
 ```
 
+````
+
 - You can get Discord IDs by enabling Developer Mode in Discord Settings -> Advanced, then right-clicking on the server/channel/user and selecting "Copy ID" / "Copy Channel ID" / "Copy User ID".
 
 ### Supabase Setup
@@ -215,3 +217,5 @@ Contributions, issues, and feature requests are welcome! Feel free to check the 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+````
