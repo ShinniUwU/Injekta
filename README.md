@@ -27,6 +27,7 @@
 
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
+- [Updating the Bot](#updating-the-bot)
 - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
   - [Supabase Setup](#supabase-setup)
@@ -50,7 +51,7 @@
 1.  **Clone the Repository:**
 
     ```bash
-    git clone [https://github.com/ShinniUwU/injekta.git](https://github.com/ShinniUwU/injekta.git)
+    git clone [https://github.com/ShinniUwU/injekta.git]
     cd injekta
     ```
 
@@ -83,6 +84,27 @@
     # or npm run prepare
     ```
 
+## Updating the Bot
+
+To get the latest changes from the GitHub repository:
+
+1.  **Pull Changes:** Navigate to your `Injekta` project directory in your terminal and run:
+
+    ```bash
+    git pull origin main
+    ```
+
+    _(This assumes `origin` is your remote name and `main` is the branch)_
+
+2.  **Install Dependencies (If Changed):** If the `package.json` file was updated (meaning dependencies might have changed), run the install command again:
+
+    ```bash
+    bun install
+    # or npm install
+    ```
+
+3.  **Restart the Bot:** Stop the bot if it's running and start it again using `bun run dev`.
+
 ## Configuration
 
 ### Environment Variables
@@ -96,15 +118,13 @@ CLIENT_ID=your_discord_client_id             # Your bot's application ID
 GUILD_ID=your_discord_guild_id               # The ID of the server where commands will be registered initially
 
 # Supabase Credentials
-SUPABASE_URL=[https://your-project-ref.supabase.co](https://www.google.com/search?q=https://your-project-ref.supabase.co)  # URL from your Supabase project API settings
+SUPABASE_URL=[https://your-project-ref.supabase.co](https://your-project-ref.supabase.co)  # URL from your Supabase project API settings
 SUPABASE_ANON_KEY=your_supabase_anon_key          # Anon key from your Supabase project API settings
 
 # Bot Configuration
 DESIGNATED_CHANNEL_ID=your_discord_channel_id  # ID of the channel for reminders and '/injection' command
 BOT_OWNER_ID=your_discord_user_id              # Optional: Your Discord user ID for potential owner-specific checks
 ```
-
-````
 
 - You can get Discord IDs by enabling Developer Mode in Discord Settings -> Advanced, then right-clicking on the server/channel/user and selecting "Copy ID" / "Copy Channel ID" / "Copy User ID".
 
@@ -148,32 +168,24 @@ You need two tables in your Supabase database. Go to the Supabase SQL Editor in 
 
 ### Running the Bot
 
-- **Development Mode (with hot-reloading):**
+To run the bot directly using `bun` (which executes TypeScript):
 
-  ```bash
-  bun run dev
-  # or npm run dev (if you configure it in package.json)
-  ```
+```bash
+bun run dev
+```
 
-- **Production Mode:**
-  1.  Build the TypeScript code:
-      ```bash
-      bun run build
-      # or npm run build
-      ```
-  2.  Run the compiled JavaScript:
-      ```bash
-      node build/bot.js
-      ```
+_(This command uses the `dev` script defined in your `package.json`. Make sure the `dev` script correctly points to your main bot file, e.g., `"dev": "bun src/bot.ts"` or `"dev": "bun run src/index.ts"` if index.ts starts your bot.)_
+
+This will start the bot. There is no separate build step required with this method.
 
 ### Available Commands
 
 - `/injection`: Logs your own injection for the current day. The bot determines the correct leg ('Right' or 'Left') and asks for confirmation via buttons. Automatically keeps only the last 5 logs.
-- `/checklogs [user: @username]` : Shows the last 5 injection logs. If `user` is specified, shows logs for that user (requires Admin permission). Defaults to showing your own logs.
-- `/stats [user: @username]` : Shows injection statistics (total logged, current streak). If `user` is specified, shows stats for that user (requires Admin permission). Defaults to showing your own stats.
+- `/checklogs [user: @username]`: Shows the last 5 injection logs. If `user` is specified, shows logs for that user (requires Admin permission). Defaults to showing your own logs.
+- `/stats [user: @username]`: Shows injection statistics (total logged, current streak). If `user` is specified, shows stats for that user (requires Admin permission). Defaults to showing your own stats.
 - `/nextinjection`: Calculates and displays the approximate time remaining until the next scheduled injection based on global settings.
-- `/setinjectionschedule day:<Day> time:<HH:MM> [timezone:<Timezone>]` : **(Admin Only)** Sets or updates the global injection schedule (day of the week, time, and optional timezone like "Europe/Sofia"). The scheduler updates dynamically.
-- `/logfor user:<@username>` : **(Admin Only)** Logs an injection for the specified `user`. Useful if someone forgets or needs assistance logging.
+- `/setinjectionschedule day:<Day> time:<HH:MM> [timezone:<Timezone>]`: **(Admin Only)** Sets or updates the global injection schedule (day of the week, time, and optional timezone like "Europe/Sofia"). The scheduler updates dynamically.
+- `/logfor user:<@username>`: **(Admin Only)** Logs an injection for the specified `user`. Useful if someone forgets or needs assistance logging.
 
 ## Development
 
@@ -203,4 +215,3 @@ Contributions, issues, and feature requests are welcome! Feel free to check the 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-````
