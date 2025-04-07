@@ -1,33 +1,35 @@
 # Injekta
 
-**Injekta** is a Discord bot built with TypeScript that helps you manage and track your HRT injections. It logs your injection data, alternates the injection leg, and sends weekly reminders—all while integrating with Supabase for persistent data storage.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+**Injekta** is a Discord bot built with TypeScript designed to help manage and track Hormone Replacement Therapy (HRT) injections. It logs injection data (alternating between 'Right' and 'Left' legs), automatically keeps only the last 5 records per user, and sends weekly reminders—all integrated with Supabase for persistent data storage.
 
 ## Features
 
-- **Slash Commands:**
-  - **/injection**: Log your injection after confirming with an interactive button.
-  - **/checklogs**: View the last 5 injection logs in a neat embed.
-  - **/nextinjection**: Check how much time remains until your next injection.
-  - **/setinjectionschedule** (Admin Only): Update the global injection schedule.
-  - **/stats**: View your injection statistics (total injections and current streak).
-
-- **Automatic Reminders:**
-  - The bot automatically sends weekly prompts and a reminder 1 hour before your scheduled injection time in a designated channel.
-
-- **Supabase Integration:**
-  - Records are stored in Supabase, allowing persistent tracking of injection data and global settings.
-
-- **Modern Development Workflow:**
-  - Built with TypeScript.
-  - Uses ESLint and Prettier for code quality and consistency.
-  - Uses ts-node-dev for fast auto-reloading during development.
-  - Husky and lint-staged ensure that code style is enforced on commits.
-  - Winston provides robust logging for runtime information and errors.
+- **Simple Logging:** Log injections easily using the `/injection` command with button confirmation.
+- **Automatic Leg Alternation:** The bot automatically determines whether the 'Right' or 'Left' leg is next based on your previous log.
+- **Log History:** View your last 5 injection logs using `/checklogs`. Older logs are automatically removed.
+- **Stats Tracking:** Check your total logged injections and current weekly streak with `/stats`.
+- **Scheduling & Reminders:**
+  - Set a global injection schedule (day, time, timezone) using `/setinjectionschedule` (Admin-only).
+  - Receive automatic reminders 1 hour before the scheduled time in a designated channel.
+  - Receive a prompt in the designated channel when it's time to log your injection.
+- **Admin Tools:**
+  - Admins can check logs (`/checklogs user:@username`) and stats (`/stats user:@username`) for other users.
+  - Admins can log injections for other users using the `/logfor user:@username` command.
+- **Persistent Storage:** All injection records and settings are stored securely in a Supabase database.
+- **Modern Development Stack:**
+  - Built with TypeScript and Discord.js v14.
+  - Uses `node-cron` for scheduling.
+  - Includes ESLint, Prettier, Husky, and lint-staged for code quality and Git hooks.
+  - Uses Winston for structured and readable logging.
 
 ## Table of Contents
 
+- [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Configuration](#configuration)
+  - [Environment Variables](#environment-variables)
+  - [Supabase Setup](#supabase-setup)
 - [Usage](#usage)
   - [Running the Bot](#running-the-bot)
   - [Available Commands](#available-commands)
@@ -36,153 +38,169 @@
 - [Contributing](#contributing)
 - [License](#license)
 
+## Prerequisites
+
+- Node.js (v18 or higher recommended)
+- Bun (or npm/yarn for package management)
+- Git
+- Access to a Supabase project
+
 ## Installation
 
-1. **Clone the Repository:**
+1.  **Clone the Repository:**
 
-   ```bash
-   git clone https://github.com/ShinniUwU/injekta.git
-   cd injekta
-   ```
+    ```bash
+    git clone [https://github.com/ShinniUwU/injekta.git](https://github.com/ShinniUwU/injekta.git)
+    cd injekta
+    ```
 
-2. **Install Dependencies:**
+2.  **Install Dependencies:**
+    Using Bun:
 
-   If you're using Bun:
+    ```bash
+    bun install
+    ```
 
-   ```bash
-   bun install
-   ```
+    Using npm:
 
-   Otherwise, if using npm:
+    ```bash
+    npm install
+    ```
 
-   ```bash
-   npm install
-   ```
+3.  **Install Cron Types (if using TypeScript):**
 
-3. **Set Up Husky:**
+    ```bash
+    # Using Bun
+    bun add --dev @types/node-cron
+    # Using npm
+    npm install --save-dev @types/node-cron
+    ```
 
-   Initialize Husky hooks by running:
-
-   ```bash
-   bun run prepare
-   ```
+4.  **Set Up Git Hooks:**
+    Initialize Husky hooks (used for pre-commit linting/formatting):
+    ```bash
+    bun run prepare
+    # or npm run prepare
+    ```
 
 ## Configuration
 
-Create a `.env` file in the root of your project with the following variables:
+### Environment Variables
+
+Create a `.env` file in the root of the project directory. Copy the following variables and fill them with your specific credentials:
 
 ```env
-BOT_TOKEN=your_discord_bot_token
-CLIENT_ID=your_discord_client_id
-GUILD_ID=your_discord_guild_id
-SUPABASE_URL=https://your-supabase-project.supabase.co
-SUPABASE_ANON_KEY=your_supabase_anon_key
+# Discord Bot Credentials
+BOT_TOKEN=your_discord_bot_token             # Your bot's secret token
+CLIENT_ID=your_discord_client_id             # Your bot's application ID
+GUILD_ID=your_discord_guild_id               # The ID of the server where commands will be registered initially
+
+# Supabase Credentials
+SUPABASE_URL=[https://your-project-ref.supabase.co](https://www.google.com/search?q=https://your-project-ref.supabase.co)  # URL from your Supabase project API settings
+SUPABASE_ANON_KEY=your_supabase_anon_key          # Anon key from your Supabase project API settings
+
+# Bot Configuration
+DESIGNATED_CHANNEL_ID=your_discord_channel_id  # ID of the channel for reminders and '/injection' command
+BOT_OWNER_ID=your_discord_user_id              # Optional: Your Discord user ID for potential owner-specific checks
 ```
 
-For admin commands, you can optionally add:
+````
 
-```env
-BOT_OWNER_ID=your_discord_id
-```
+- You can get Discord IDs by enabling Developer Mode in Discord Settings -> Advanced, then right-clicking on the server/channel/user and selecting "Copy ID" / "Copy Channel ID" / "Copy User ID".
 
-Ensure your Supabase database has the following tables:
+### Supabase Setup
 
-### Injections Table
+You need two tables in your Supabase database. Go to the Supabase SQL Editor in your project dashboard and run the following queries:
 
-```sql
-CREATE TABLE injections (
-  id SERIAL PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  leg TEXT NOT NULL,
-  injection_date TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
-);
-```
+1.  **Create `injections` Table:**
 
-### Global Settings Table
+    ```sql
+    CREATE TABLE injections (
+      id SERIAL PRIMARY KEY,
+      user_id TEXT NOT NULL,          -- Discord User ID
+      leg TEXT NOT NULL,              -- Stores 'Right' or 'Left'
+      injection_date TEXT NOT NULL,   -- Date in DD-MM-YYYY format
+      created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL -- Timestamp of when the record was created
+    );
+    ```
 
-```sql
-CREATE TABLE global_settings (
-  id INT PRIMARY KEY,
-  injection_day INT NOT NULL,  -- 0 = Sunday, …, 6 = Saturday
-  injection_time TEXT NOT NULL, -- e.g., "09:00"
-  timezone TEXT NOT NULL        -- e.g., "UTC" or "America/New_York"
-);
+2.  **Create `global_settings` Table:**
 
--- Insert default settings:
-INSERT INTO global_settings (id, injection_day, injection_time, timezone)
-VALUES (1, 6, '09:00', 'UTC');
-```
+    ```sql
+    CREATE TABLE global_settings (
+      id INT PRIMARY KEY CHECK (id = 1), -- Ensure only one row with id = 1 exists
+      injection_day INT NOT NULL,         -- Day of week: 0 = Sunday, ..., 6 = Saturday
+      injection_time TEXT NOT NULL,       -- Time in HH:MM (24-hour format, e.g., "14:30")
+      timezone TEXT NOT NULL              -- Timezone name (e.g., "UTC", "Europe/Sofia", "America/New_York")
+    );
+    ```
+
+3.  **Insert Initial Settings:** (Required for the scheduler to work)
+    ```sql
+    -- Example: Set default schedule to Saturday at 11:00 AM UTC
+    INSERT INTO global_settings (id, injection_day, injection_time, timezone)
+    VALUES (1, 6, '11:00', 'UTC')
+    ON CONFLICT (id) DO NOTHING; -- Prevents error if settings already exist
+    ```
+    _(Adjust the values `6`, `'11:00'`, and `'UTC'` to your desired default schedule)._
 
 ## Usage
 
 ### Running the Bot
 
-- **Development Mode:**  
-  Run the bot with:
+- **Development Mode (with hot-reloading):**
 
   ```bash
   bun run dev
+  # or npm run dev (if you configure it in package.json)
   ```
 
-  This uses ts-node-dev for hot reloading.
-
-- **Build:**  
-  To compile the TypeScript files to JavaScript:
-
-  ```bash
-  bun run build
-  ```
+- **Production Mode:**
+  1.  Build the TypeScript code:
+      ```bash
+      bun run build
+      # or npm run build
+      ```
+  2.  Run the compiled JavaScript:
+      ```bash
+      node build/bot.js
+      ```
 
 ### Available Commands
 
-- **/injection:**  
-  Log your injection after confirming via an interactive button.
-  
-- **/checklogs:**  
-  View the last 5 injection logs in a formatted embed.
-
-- **/nextinjection:**  
-  See how much time is remaining until your next injection (displayed in months, days, hours, and minutes).
-
-- **/setinjectionschedule (Admin Only):**  
-  Update the global injection schedule. Accepts parameters: day (e.g., "Saturday"), time (e.g., "09:00"), and optionally timezone.
-
-- **/stats:**  
-  View your injection statistics, including total injections and your current streak.
+- `/injection`: Logs your own injection for the current day. The bot determines the correct leg ('Right' or 'Left') and asks for confirmation via buttons. Automatically keeps only the last 5 logs.
+- `/checklogs [user: @username]` : Shows the last 5 injection logs. If `user` is specified, shows logs for that user (requires Admin permission). Defaults to showing your own logs.
+- `/stats [user: @username]` : Shows injection statistics (total logged, current streak). If `user` is specified, shows stats for that user (requires Admin permission). Defaults to showing your own stats.
+- `/nextinjection`: Calculates and displays the approximate time remaining until the next scheduled injection based on global settings.
+- `/setinjectionschedule day:<Day> time:<HH:MM> [timezone:<Timezone>]` : **(Admin Only)** Sets or updates the global injection schedule (day of the week, time, and optional timezone like "Europe/Sofia"). The scheduler updates dynamically.
+- `/logfor user:<@username>` : **(Admin Only)** Logs an injection for the specified `user`. Useful if someone forgets or needs assistance logging.
 
 ## Development
 
 ### Linting & Formatting
 
-- **ESLint:**  
-  Check your code by running:
-
+- **Check Code with ESLint:**
   ```bash
   bun run lint
+  # or npm run lint
   ```
-
-- **Prettier:**  
-  To check formatting:
-
+- **Check Formatting with Prettier:**
   ```bash
   bun run prettier-check
+  # or npm run prettier-check
   ```
-
-  To automatically format your code:
-
+- **Automatically Format Code with Prettier:**
   ```bash
   bun run prettier-write
+  # or npm run prettier-write
   ```
-
-### Testing
-
-Currently, there are no tests set up. You can add tests later if needed.
+- Linting and formatting are also run automatically on commit via Husky and lint-staged.
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or submit a pull request if you have suggestions, bug fixes, or new features.
+Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/ShinniUwU/injekta/issues).
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+````
