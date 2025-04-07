@@ -50,7 +50,7 @@
 1.  **Clone the Repository:**
 
     ```bash
-    git clone [https://github.com/ShinniUwU/injekta.git](https://github.com/ShinniUwU/injekta.git)
+    git clone https://github.com/ShinniUwU/injekta.git
     cd injekta
     ```
 
