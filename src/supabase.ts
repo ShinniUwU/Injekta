@@ -1,13 +1,22 @@
 // src/supabase.ts
 import { createClient } from '@supabase/supabase-js';
+import type {
+  SupabaseClient,
+  PostgrestSingleResponse,
+} from '@supabase/supabase-js'; // Use import type
 import dotenv from 'dotenv';
 import logger from './logger';
+import { config } from './config';
 
 dotenv.config();
 
-export const supabaseUrl = process.env.SUPABASE_URL as string;
-export const supabaseAnonKey = process.env.SUPABASE_ANON_KEY as string;
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabaseUrl = config.supabaseUrl;
+export const supabaseAnonKey = config.supabaseAnonKey;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  logger.error('Supabase URL or Anon Key is missing in configuration.');
+  process.exit(1);
+}
 
 export interface InjectionRecord {
   id: number;
@@ -19,111 +28,200 @@ export interface InjectionRecord {
 
 export interface GlobalSettings {
   id: number;
-  injection_day: number; // 0=Sunday, …,6=Saturday
-  injection_time: string; // "HH:MM", e.g., "09:00"
-  timezone: string; // e.g., "UTC", "America/New_York"
+  injection_day: number;
+  injection_time: string;
+  timezone: string;
 }
+
+export const supabase: SupabaseClient = createClient(
+  supabaseUrl,
+  supabaseAnonKey,
+);
+
+// --- Database Functions ---
 
 export async function getLastRecord(
   userId?: string,
 ): Promise<InjectionRecord | null> {
-  // Use .from() without generics, then cast the result.
-  let query = supabase.from('injections') as unknown as {
-    select: (cols: string) => any;
-    eq: (column: string, value: string) => any;
-  };
-  if (userId) {
-    query = query.eq('user_id', userId);
-  }
-  const { data, error } = await query
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(1);
-  if (error) {
-    logger.error('Error fetching last record:', error);
+  try {
+    let queryBuilder = supabase
+      .from('injections')
+      .select<string, InjectionRecord>('*');
+
+    if (userId) {
+      queryBuilder = queryBuilder.eq('user_id', userId);
+    }
+
+    const { data, error } = await queryBuilder
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      logger.error('Supabase error fetching last record:', {
+        userId,
+        message: error.message,
+        details: error.details,
+        code: error.code,
+      });
+      return null;
+    }
+    return data;
+  } catch (e) {
+    logger.error('Unexpected error in getLastRecord:', e);
     return null;
   }
-  return data && data.length ? (data[0] as InjectionRecord) : null;
-}
+} // Closing brace for getLastRecord
 
-export async function enforceMaxFiveRecords(userId?: string): Promise<void> {
-  let query = supabase.from('injections') as any;
-  query = query.select('*').order('created_at', { ascending: true });
-  if (userId) query = query.eq('user_id', userId);
-
-  const { data, error } = await query;
-  if (error) {
-    logger.error('Error fetching records:', error);
-    return;
-  }
-  if (data && data.length >= 5) {
-    const oldestId = data[0].id;
-    const { error: deleteError } = await supabase
+export async function enforceMaxFiveRecords(userId: string): Promise<void> {
+  try {
+    // Opening brace for try block (matches related info start point)
+    const { count, error: countError } = await supabase
       .from('injections')
-      .delete()
-      .eq('id', oldestId);
-    if (deleteError) {
-      logger.error('Error deleting oldest record:', deleteError);
-    } else {
-      console.log(
-        `Deleted record with id = ${oldestId} to maintain max 5 records.`,
-      );
-    }
-  }
-}
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId);
 
-export function getNextLeg(lastLeg: string): string {
-  return lastLeg === 'Good' ? 'Bad' : 'Good';
-}
+    if (countError) {
+      logger.error('Supabase error counting records:', {
+        userId,
+        message: countError.message,
+      });
+      return;
+    }
+
+    if (count !== null && count >= 5) {
+      const numToDelete = count - 4;
+
+      const { data: oldestRecords, error: selectError } = await supabase
+        .from('injections')
+        .select('id')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true })
+        .limit(numToDelete);
+
+      if (selectError) {
+        logger.error('Supabase error selecting oldest records to delete:', {
+          userId,
+          message: selectError.message,
+        });
+        return;
+      }
+
+      if (oldestRecords && oldestRecords.length > 0) {
+        const idsToDelete = oldestRecords.map((record) => record.id);
+
+        const { error: deleteError } = await supabase
+          .from('injections')
+          .delete()
+          .in('id', idsToDelete);
+
+        if (deleteError) {
+          logger.error('Supabase error deleting oldest records:', {
+            userId,
+            ids: idsToDelete,
+            message: deleteError.message,
+          });
+        } else {
+          logger.info(
+            `Deleted ${idsToDelete.length} oldest record(s) for user ${userId} to maintain max 5.`,
+          ); // Line 104 area
+        } // Closing brace for else
+      } // Closing brace for if(oldestRecords...)
+    } // Closing brace for if(count...)
+  } catch (e) {
+    // Closing brace for try, opening for catch
+    logger.error('Unexpected error in enforceMaxFiveRecords:', e);
+  } // Closing brace for catch
+} // Closing brace for enforceMaxFiveRecords
+
+export function getNextLeg(lastLeg?: string | null): string {
+  return lastLeg === 'Right' ? 'Left' : 'Right';
+} // Closing brace for getNextLeg
 
 export async function createInjectionRecord(
   userId: string,
 ): Promise<{ leg: string; date: string } | null> {
-  const lastRecord = await getLastRecord(userId);
-  let nextLeg = 'Good';
-  if (lastRecord) {
-    nextLeg = getNextLeg(lastRecord.leg);
-  }
-  // Format current date as DD-MM-YYYY.
-  const now = new Date();
-  const day = now.getDate().toString().padStart(2, '0');
-  const month = (now.getMonth() + 1).toString().padStart(2, '0');
-  const year = now.getFullYear();
-  const injectionDate = `${day}-${month}-${year}`;
+  try {
+    const lastRecord = await getLastRecord(userId);
+    const nextLeg = getNextLeg(lastRecord?.leg);
 
-  const { data, error } = await supabase
-    .from('injections')
-    .insert([{ user_id: userId, leg: nextLeg, injection_date: injectionDate }]);
-  if (error) {
-    logger.error('Error inserting new record:', error);
+    const now = new Date();
+    const day = now.getDate().toString().padStart(2, '0');
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const year = now.getFullYear();
+    const injectionDate = `${day}-${month}-${year}`;
+
+    const newRecord: Omit<InjectionRecord, 'id' | 'created_at'> = {
+      user_id: userId,
+      leg: nextLeg,
+      injection_date: injectionDate,
+    };
+
+    const { data, error } = await supabase
+      .from('injections')
+      .insert(newRecord)
+      .select()
+      .single();
+
+    if (error) {
+      logger.error('Supabase error inserting new record:', {
+        userId,
+        message: error.message,
+      });
+      return null;
+    }
+    if (!data) {
+      logger.error('Supabase insert returned success but no data.', { userId });
+      return null;
+    }
+
+    await enforceMaxFiveRecords(userId);
+    return { leg: nextLeg, date: injectionDate };
+  } catch (e) {
+    logger.error('Unexpected error in createInjectionRecord:', e);
     return null;
   }
-  await enforceMaxFiveRecords(userId);
-  return { leg: nextLeg, date: injectionDate };
-}
+} // Closing brace for createInjectionRecord
 
 export async function getGlobalSettings(): Promise<GlobalSettings | null> {
-  const { data, error } = await supabase
-    .from<'global_settings', GlobalSettings>('global_settings')
-    .select('*')
-    .limit(1)
-    .single();
-  if (error) {
-    logger.error('Error fetching global settings:', error);
+  try {
+    const { data, error } = await supabase
+      .from('global_settings')
+      .select('*')
+      .eq('id', 1)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      logger.error('Supabase error fetching global settings:', {
+        message: error.message,
+      });
+      return null;
+    }
+    return data;
+  } catch (e) {
+    logger.error('Unexpected error in getGlobalSettings:', e);
     return null;
   }
-  return data;
-}
+} // Closing brace for getGlobalSettings
 
 export async function setGlobalSettings(
   settings: Omit<GlobalSettings, 'id'>,
 ): Promise<boolean> {
-  const { error } = await supabase
-    .from('global_settings')
-    .upsert({ id: 1, ...settings });
-  if (error) {
-    logger.error('Error setting global settings:', error);
+  try {
+    const { error } = await supabase
+      .from('global_settings')
+      .upsert({ id: 1, ...settings }, { onConflict: 'id' });
+
+    if (error) {
+      logger.error('Supabase error setting global settings:', {
+        message: error.message,
+      });
+      return false;
+    }
+    return true;
+  } catch (e) {
+    logger.error('Unexpected error in setGlobalSettings:', e);
     return false;
   }
-  return true;
-}
+} // Closing brace for setGlobalSettings
