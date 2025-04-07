@@ -1,32 +1,70 @@
-import { MessageFlags, PermissionFlagsBits } from 'discord.js';
+// src/handlers/setInjectionScheduleCommand.ts
+import type { CommandInteraction } from 'discord.js'; // Import type
+import { MessageFlags, PermissionFlagsBits } from 'discord.js'; // Import MessageFlags
+import type { GlobalSettings } from '../supabase';
 import { setGlobalSettings } from '../supabase';
+import logger from '../logger';
 
-export async function handleSetInjectionScheduleCommand(interaction: any) {
-  // Check if the member has Administrator permissions.
-  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+const dayNameToNumber: { [key: string]: number } = {
+  /* ... as before ... */ sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+
+export async function handleSetInjectionScheduleCommand(
+  interaction: CommandInteraction, // Use specific type
+  triggerReschedule: () => Promise<void>,
+) {
+  if (!interaction.inGuild()) {
+    // Use flags for reply
     await interaction.reply({
-      content: 'You do not have permission to set the injection schedule.',
+      content: 'This command can only be used in a server.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  if (
+    !interaction.member ||
+    typeof interaction.member.permissions === 'string' ||
+    !interaction.member.permissions.has(PermissionFlagsBits.Administrator)
+  ) {
+    // Use flags for reply
+    await interaction.reply({
+      content:
+        'You do not have permission (Administrator) to set the injection schedule.',
       flags: MessageFlags.Ephemeral,
     });
     return;
   }
 
-  const day = interaction.options.getString('day'); // e.g., "Saturday"
-  const time = interaction.options.getString('time'); // e.g., "09:00"
-  const timezone = interaction.options.getString('timezone') || 'UTC';
+  const dayOption = interaction.options.get('day', true);
+  const timeOption = interaction.options.get('time', true);
+  const timezoneOption = interaction.options.get('timezone');
 
-  const days: { [key: string]: number } = {
-    sunday: 0,
-    monday: 1,
-    tuesday: 2,
-    wednesday: 3,
-    thursday: 4,
-    friday: 5,
-    saturday: 6,
-  };
+  if (
+    typeof dayOption.value !== 'string' ||
+    typeof timeOption.value !== 'string'
+  ) {
+    // Use flags for reply
+    await interaction.reply({
+      content: 'Invalid option types received.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
 
-  const injection_day = days[day.toLowerCase()];
+  const dayName = dayOption.value.toLowerCase();
+  const time = timeOption.value;
+  const timezone =
+    typeof timezoneOption?.value === 'string' ? timezoneOption.value : 'UTC';
+
+  const injection_day = dayNameToNumber[dayName];
   if (injection_day === undefined) {
+    // Use flags for reply
     await interaction.reply({
       content: 'Invalid day provided. Please use Sunday, Monday, etc.',
       flags: MessageFlags.Ephemeral,
@@ -34,28 +72,54 @@ export async function handleSetInjectionScheduleCommand(interaction: any) {
     return;
   }
 
-  if (!/^\d{2}:\d{2}$/.test(time)) {
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+    // Use flags for reply
     await interaction.reply({
-      content: 'Invalid time format. Please use HH:MM (24-hour).',
+      content:
+        'Invalid time format. Please use HH:MM (24-hour format, e.g., 09:00 or 14:30).',
       flags: MessageFlags.Ephemeral,
     });
     return;
   }
 
-  const success = await setGlobalSettings({
+  // Use flags for deferReply
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const newSettings: Omit<GlobalSettings, 'id'> = {
     injection_day,
     injection_time: time,
     timezone,
-  });
+  };
+
+  const success = await setGlobalSettings(newSettings);
+
   if (success) {
-    await interaction.reply({
-      content: `Injection schedule updated to ${day} at ${time} (${timezone}).`,
-      flags: MessageFlags.Ephemeral,
-    });
+    logger.info(
+      `Injection schedule updated by ${interaction.user.tag} to ${dayName} at ${time} (${timezone}).`,
+    );
+    try {
+      await triggerReschedule();
+      await interaction.editReply(
+        `Injection schedule updated to ${dayOption.value} at ${time} (${timezone}). The scheduler has been updated.`,
+      );
+      logger.info('Scheduler successfully updated following schedule change.');
+    } catch (rescheduleError) {
+      logger.error(
+        'Failed to update the live schedule after database update:',
+        rescheduleError,
+      );
+      await interaction.editReply(
+        `Injection schedule updated in the database to ${dayOption.value} at ${time} (${timezone}), but failed to update the live schedule. Please restart the bot to apply changes.`,
+      );
+    }
   } else {
-    await interaction.reply({
-      content: 'There was an error updating the injection schedule.',
-      flags: MessageFlags.Ephemeral,
+    logger.error(
+      `Failed to update injection schedule in database for ${interaction.user.tag}.`,
+    );
+    await interaction.editReply({
+      content:
+        'There was an error updating the injection schedule in the database.',
+      // No need for embeds/components if just sending content
     });
   }
 }
