@@ -126,4 +126,3 @@ DESIGNATED_CHANNEL_ID=your_discord_channel_id  # ID of the channel for reminders
 BOT_OWNER_ID=your_discord_user_id              # Optional: Your Discord user ID for potential owner-specific checks
 ```
 
-````
