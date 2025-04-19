@@ -1,7 +1,7 @@
 # Injekta
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-**Injekta** is a Discord bot built with TypeScript designed to help manage and track Hormone Replacement Therapy (HRT) injections. It logs injection data (alternating between 'Right' and 'Left' legs), automatically keeps only the last 5 records per user, and sends weekly reminders—all integrated with Supabase for persistent data storage.
+**Injekta** is a Discord bot built with TypeScript designed to help manage and track Hormone Replacement Therapy (HRT) injections. It logs injection data (alternating between 'Right' and 'Left' legs), automatically keeps only the last 5 records per user, and sends weekly reminders—all integrated with a **self-hosted PostgreSQL database** for persistent data storage.
 
 ## Features
 
@@ -11,14 +11,18 @@
 - **Stats Tracking:** Check your total logged injections and current weekly streak with `/stats`.
 - **Scheduling & Reminders:**
   - Set a global injection schedule (day, time, timezone) using `/setinjectionschedule` (Admin-only).
-  - Receive automatic reminders 1 hour before the scheduled time in a designated channel.
-  - Receive a prompt in the designated channel when it's time to log your injection.
+  * Receive automatic reminders 1 hour before the scheduled time in a designated channel.
+  * Receive a prompt in the designated channel when it's time to log your injection.
+- **Log Deletion:**
+    - Users can delete their own latest log (or a specific one by ID) using `/deletemylog` (with confirmation).
+    - Admins can delete any specific log entry for any user using `/admindeletelog`.
 - **Admin Tools:**
   - Admins can check logs (`/checklogs user:@username`) and stats (`/stats user:@username`) for other users.
   - Admins can log injections for other users using the `/logfor user:@username` command.
-- **Persistent Storage:** All injection records and settings are stored securely in a Supabase database.
+- **Persistent Storage:** All injection records and settings are stored securely in a PostgreSQL database.
 - **Modern Development Stack:**
   - Built with TypeScript and Discord.js v14.
+  - Uses `pg` (node-postgres) for database interaction.
   - Uses `node-cron` for scheduling.
   - Includes ESLint, Prettier, Husky, and lint-staged for code quality and Git hooks.
   - Uses Winston for structured and readable logging.
@@ -27,10 +31,9 @@
 
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
-- [Updating the Bot](#updating-the-bot)
+- [Database Setup](#database-setup)
 - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
-  - [Supabase Setup](#supabase-setup)
 - [Usage](#usage)
   - [Running the Bot](#running-the-bot)
   - [Available Commands](#available-commands)
@@ -44,72 +47,64 @@
 - Node.js (v18 or higher recommended)
 - Bun (or npm/yarn for package management)
 - Git
-- Access to a Supabase project
+- Access to a **PostgreSQL database server** (v12 or higher recommended)
 
 ## Installation
 
 1.  **Clone the Repository:**
-
     ```bash
-    git clone [https://github.com/ShinniUwU/injekta.git]
-    cd injekta
+    git clone [https://github.com/ShinniUwU/Injekta.git](https://github.com/ShinniUwU/Injekta.git)
+    cd Injekta
     ```
 
 2.  **Install Dependencies:**
-    Using Bun:
-
+    Using Bun (recommended):
     ```bash
     bun install
     ```
-
     Using npm:
-
     ```bash
     npm install
     ```
 
-3.  **Install Cron Types (if using TypeScript):**
-
-    ```bash
-    # Using Bun
-    bun add --dev @types/node-cron
-    # Using npm
-    npm install --save-dev @types/node-cron
-    ```
-
-4.  **Set Up Git Hooks:**
+3.  **Set Up Git Hooks (Optional but Recommended):**
     Initialize Husky hooks (used for pre-commit linting/formatting):
     ```bash
     bun run prepare
     # or npm run prepare
     ```
+    *(Proceed to [Database Setup](#database-setup) next)*
 
-## Updating the Bot
+## Database Setup
 
-To get the latest changes from the GitHub repository:
+This bot requires a running PostgreSQL database server.
 
-1.  **Pull Changes:** Navigate to your `Injekta` project directory in your terminal and run:
+1.  **Ensure PostgreSQL is Running:** Install and run PostgreSQL on your local machine or server. Refer to the official PostgreSQL documentation for your operating system:
+    * [PostgreSQL Downloads](https://www.postgresql.org/download/) (Choose your OS)
+    * Example setup commands for [Debian/Ubuntu](https://www.postgresql.org/download/linux/debian/) or [Fedora](https://www.postgresql.org/download/linux/redhat/).
 
-    ```bash
-    git pull origin main
+2.  **Create Database and User:** Connect to your PostgreSQL instance (e.g., using `psql`) and create a dedicated database and user for the bot. Replace `your_secure_password` with a strong password.
+
+    ```sql
+    -- Example commands using psql:
+    CREATE DATABASE injekta_db;
+    CREATE USER injekta_user WITH PASSWORD 'your_secure_password';
+    GRANT ALL PRIVILEGES ON DATABASE injekta_db TO injekta_user;
     ```
 
-    _(This assumes `origin` is your remote name and `main` is the branch)_
-
-2.  **Install Dependencies (If Changed):** If the `package.json` file was updated (meaning dependencies might have changed), run the install command again:
+3.  **Create Database Schema:** Navigate to the project directory (`Injekta`) in your terminal and use the `psql` client to run the provided `schema.sql` script. This will create the necessary tables (`injections`, `global_settings`). Replace placeholders with your actual connection details.
 
     ```bash
-    bun install
-    # or npm install
+    psql -h <hostname> -p <port> -U injekta_user -d injekta_db -f schema.sql
     ```
-
-3.  **Restart the Bot:** Stop the bot if it's running and start it again using `bun run dev`.
+    *(Example: `psql -h localhost -p 5432 -U injekta_user -d injekta_db -f schema.sql`)*
+    Enter the password for `injekta_user` when prompted.
 
 ## Configuration
 
 ### Environment Variables
 
-Create a `.env` file in the root of the project directory. Copy the following variables and fill them with your specific credentials:
+Create a `.env` file in the root of the project directory (`Injekta/.env`). Copy the following variables and fill them with your specific credentials:
 
 ```env
 # Discord Bot Credentials
@@ -117,12 +112,72 @@ BOT_TOKEN=your_discord_bot_token             # Your bot's secret token
 CLIENT_ID=your_discord_client_id             # Your bot's application ID
 GUILD_ID=your_discord_guild_id               # The ID of the server where commands will be registered initially
 
-# Supabase Credentials
-SUPABASE_URL=[https://your-project-ref.supabase.co](https://your-project-ref.supabase.co)  # URL from your Supabase project API settings
-SUPABASE_ANON_KEY=your_supabase_anon_key          # Anon key from your Supabase project API settings
+# PostgreSQL Database Connection URL
+# Format: postgresql://<user>:<password>@<host>:<port>/<database_name>
+DATABASE_URL=postgresql://injekta_user:your_secure_password@localhost:5432/injekta_db
 
 # Bot Configuration
 DESIGNATED_CHANNEL_ID=your_discord_channel_id  # ID of the channel for reminders and '/injection' command
 BOT_OWNER_ID=your_discord_user_id              # Optional: Your Discord user ID for potential owner-specific checks
-```
+````
 
+Replace placeholders like `<user>`, `<password>`, `<host>`, `<port>`, `<database_name>` in `DATABASE_URL` with the actual values for your PostgreSQL setup created in the [Database Setup](https://www.google.com/search?q=%23database-setup) step.
+
+## Usage
+
+### Running the Bot
+
+  * **Development:** For local testing and development:
+    ```bash
+    bun run dev
+    ```
+  * **Production/Deployment:** For running the bot continuously on a server, it's highly recommended to use a process manager like `pm2`:
+    ```bash
+    # Install pm2 globally (if not already installed)
+    npm install -g pm2
+    # or bun install -g pm2
+
+    # Start the bot with pm2
+    # Make sure you are in the project directory
+    pm2 start bun --name injekta -- run dev
+    # Or specify the script directly:
+    # pm2 start src/bot.ts --name injekta --interpreter bun
+
+    # Optional: Save the pm2 process list to restart automatically on server reboot
+    pm2 save
+
+    # Monitor logs
+    pm2 logs injekta
+
+    # Stop the bot
+    pm2 stop injekta
+    ```
+
+### Available Commands
+
+  * `/injection`: Log your weekly injection (requires confirmation). Must be used in the designated channel.
+  * `/checklogs [user]`: Display the last 5 injection logs for yourself or the specified user (user option requires Admin permissions).
+  * `/stats [user]`: Show injection statistics (total logs, current streak) for yourself or the specified user (user option requires Admin permissions).
+  * `/nextinjection`: Check the approximate time remaining until the next scheduled injection based on the global schedule.
+  * `/deletemylog [log_id]`: Delete one of your own log entries. If `log_id` is provided, deletes that specific entry. If omitted, deletes your most recent entry (requires confirmation).
+  * `/setinjectionschedule <day> <time> [timezone]` (Admin-only): Set the global injection schedule (day of week, HH:MM time, optional IANA timezone like 'UTC' or 'America/New\_York').
+  * `/logfor <user>` (Admin-only): Log an injection for the specified user.
+  * `/admindeletelog <user> <log_id>` (Admin-only): Delete a specific log entry (using its unique ID) for the specified user.
+
+## Development
+
+### Linting & Formatting
+
+This project uses ESLint for linting and Prettier for code formatting. Git hooks are set up using Husky and lint-staged to automatically lint and format code on commit.
+
+  * Check formatting: `bun run prettier-check`
+  * Apply formatting: `bun run prettier-write`
+  * Run linter: `bun run lint`
+
+## Contributing
+
+Contributions are welcome\! Please feel free to submit a Pull Request or open an Issue.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](https://www.google.com/search?q=LICENSE) file for details.
