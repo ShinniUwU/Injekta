@@ -1,7 +1,7 @@
 // src/handlers/nextInjectionCommand.ts
 import type { CommandInteraction } from 'discord.js'; // Import type
 import { EmbedBuilder, MessageFlags } from 'discord.js'; // Import MessageFlags
-import { getGlobalSettings } from '../supabase';
+import { getGlobalSettings } from '../database';
 import logger from '../logger'; // Import logger
 
 export async function handleNextInjectionCommand(

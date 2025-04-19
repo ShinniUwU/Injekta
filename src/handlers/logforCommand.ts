@@ -1,7 +1,7 @@
 // src/handlers/logforCommand.ts
 import type { CommandInteraction } from 'discord.js';
 import { MessageFlags, PermissionFlagsBits } from 'discord.js';
-import { createInjectionRecord } from '../supabase';
+import { createInjectionRecord } from '../database';
 import logger from '../logger';
 
 export async function handleLogforCommand(interaction: CommandInteraction) {

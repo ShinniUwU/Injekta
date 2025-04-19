@@ -1,45 +1,69 @@
 // src/logger.ts
 import { createLogger, format, transports } from 'winston';
+import util from 'util'; // Import the 'util' module
+
+// Helper function to format metadata, including errors, nicely
+const formatMeta = (meta: any): string => {
+  // Filter out common properties already handled (timestamp, level, message, stack)
+  const metaToInspect = { ...meta };
+  delete metaToInspect.timestamp;
+  delete metaToInspect.level;
+  delete metaToInspect.message;
+  delete metaToInspect.stack;
+  delete metaToInspect[Symbol.for('level')]; // Remove Winston's internal level symbol
+  delete metaToInspect[Symbol.for('message')]; // Remove Winston's internal message symbol
+  delete metaToInspect[Symbol.for('splat')]; // Remove Winston's internal splat symbol
+
+  // Check if there's anything left to inspect
+  if (Object.keys(metaToInspect).length === 0) {
+    return '';
+  }
+
+  // Use util.inspect for potentially deep objects, enable colors for console
+  // Set depth high enough to see nested properties in pgError
+  const inspected = util.inspect(metaToInspect, {
+    depth: 5,
+    colors: true,
+    compact: true,
+  });
+
+  // Only return if there's something meaningful besides an empty object representation
+  if (inspected !== '{}' && inspected !== 'undefined' && inspected !== 'null') {
+    return ` ${inspected}`; // Add a space before metadata
+  }
+  return '';
+};
 
 const logger = createLogger({
   level: 'info',
-  // Combine multiple formatters
   format: format.combine(
-    format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), // More readable timestamp
-    format.errors({ stack: true }), // Ensure errors include stack traces
-    format.splat(), // Necessary for string interpolation like %s, %d
-    format.colorize(), // Add colors to the output level
-    // Define a custom printf format
-    format.printf(({ timestamp, level, message, stack }) => {
-      // If there's a stack trace, print it on a new line after the message
-      if (stack) {
-        // Useful for errors
-        return `${timestamp} ${level}: ${message}\n${stack}`;
+    format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    format.errors({ stack: true }), // Keep stack traces for Error objects
+    format.splat(),
+    format.colorize(),
+    // Updated printf format
+    format.printf(({ timestamp, level, message, stack, ...meta }) => {
+      let logMessage = `${timestamp} ${level}: ${message}`;
+
+      // Append any other metadata found, using our helper function
+      // This should now properly format the { pgError: ... } object
+      const metaString = formatMeta(meta);
+      if (metaString) {
+        logMessage += metaString;
       }
-      // Otherwise, just print the standard log message
-      return `${timestamp} ${level}: ${message}`;
+
+      // If there's a stack trace (from format.errors), append it *after* metadata
+      // Useful for application-level errors, less so for DB errors handled via meta
+      if (stack) {
+        logMessage += `\n${stack}`;
+      }
+
+      return logMessage;
     }),
   ),
   transports: [
-    // Log to the console
     new transports.Console(),
-    // Optionally add file transports with different formats if needed
-    // e.g., a JSON format for file logging
-    // new transports.File({
-    //   filename: 'combined.log',
-    //   format: format.combine(
-    //     format.timestamp(),
-    //     format.json() // Use JSON format for file logs
-    //   )
-    // }),
-    // new transports.File({
-    //   filename: 'error.log',
-    //   level: 'error',
-    //   format: format.combine(
-    //     format.timestamp(),
-    //     format.json()
-    //   )
-    // })
+    // Optional file transports remain commented out
   ],
 });
 

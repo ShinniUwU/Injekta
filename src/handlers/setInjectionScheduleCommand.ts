@@ -1,8 +1,8 @@
 // src/handlers/setInjectionScheduleCommand.ts
 import type { CommandInteraction } from 'discord.js'; // Import type
 import { MessageFlags, PermissionFlagsBits } from 'discord.js'; // Import MessageFlags
-import type { GlobalSettings } from '../supabase';
-import { setGlobalSettings } from '../supabase';
+import type { GlobalSettings } from '../database';
+import { setGlobalSettings } from '../database';
 import logger from '../logger';
 
 const dayNameToNumber: { [key: string]: number } = {

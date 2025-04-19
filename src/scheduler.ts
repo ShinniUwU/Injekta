@@ -12,8 +12,8 @@ import {
 } from 'discord.js';
 import * as cron from 'node-cron';
 import type { ScheduledTask } from 'node-cron';
-import type { GlobalSettings } from './supabase';
-import { getGlobalSettings } from './supabase'; // Ensure this is correctly imported
+import type { GlobalSettings } from './database';
+import { getGlobalSettings } from './database'; // Ensure this is correctly imported
 import logger from './logger';
 import { config } from './config';
 

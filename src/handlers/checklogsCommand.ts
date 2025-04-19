@@ -1,22 +1,22 @@
 // src/handlers/checklogsCommand.ts
 import type { CommandInteraction, User } from 'discord.js';
 import { EmbedBuilder, MessageFlags, PermissionFlagsBits } from 'discord.js';
-import { supabase } from '../supabase';
-import type { InjectionRecord } from '../supabase';
+// Ensure this import points to the correctly exported function in src/database.ts
+import { getRecentLogs } from '../database'; // <--- VERIFY THIS LINE
+import type { InjectionRecord } from '../database';
 import logger from '../logger';
 
+// ... rest of the file (should be okay from previous updates) ...
 export async function handleChecklogsCommand(interaction: CommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  // Get the user option data slightly differently
-  const userOption = interaction.options.get('user'); // Get the raw option
-  const targetUserFromOption = userOption?.user; // Access the user property from the option data
+  const userOption = interaction.options.get('user');
+  const targetUserFromOption = userOption?.user;
 
   let userIdToCheck: string;
   let userToCheck: User;
 
   if (targetUserFromOption) {
-    // If a user option was provided and resolved
     if (
       !interaction.inGuild() ||
       !interaction.member ||
@@ -34,34 +34,25 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
     userIdToCheck = targetUserFromOption.id;
     userToCheck = targetUserFromOption;
   } else {
-    // Default to the user running the command
     userIdToCheck = interaction.user.id;
     userToCheck = interaction.user;
   }
 
-  // Rest of the function remains the same...
-  const { data, error } = await supabase
-    .from('injections')
-    .select<string, InjectionRecord>('*')
-    .eq('user_id', userIdToCheck)
-    .order('created_at', { ascending: false })
-    .limit(5);
+  const records: InjectionRecord[] = await getRecentLogs(userIdToCheck, 5);
 
-  if (error) {
-    logger.error('Error fetching logs:', {
-      userId: userIdToCheck,
-      message: error.message,
-    });
-    await interaction.editReply(
-      `Error retrieving logs for ${userToCheck.username}.`,
-    );
-    return;
-  }
-
-  if (!data || data.length === 0) {
-    await interaction.editReply(
-      `No injection logs found for ${userToCheck.username}.`,
-    );
+  if (!records || records.length === 0) {
+    if (records === null) {
+      logger.error('Error fetching logs for checklogs command', {
+        userId: userIdToCheck,
+      });
+      await interaction.editReply(
+        `Error retrieving logs for ${userToCheck.username}.`,
+      );
+    } else {
+      await interaction.editReply(
+        `No injection logs found for ${userToCheck.username}.`,
+      );
+    }
     return;
   }
 
@@ -74,8 +65,8 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
     )
     .setTimestamp();
 
-  const fields = data.map((record) => ({
-    name: record.injection_date,
+  const fields = records.map((record) => ({
+    name: record.injection_date || 'Unknown Date',
     value: record.leg === 'Right' ? '✅ Right leg' : '❌ Left leg',
     inline: false,
   }));
