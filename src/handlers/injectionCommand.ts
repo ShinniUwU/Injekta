@@ -13,7 +13,7 @@ import {
   EmbedBuilder,
   MessageFlags, // Import MessageFlags
 } from 'discord.js';
-import { createInjectionRecord } from '../supabase';
+import { createInjectionRecord } from '../database';
 import { config } from '../config';
 import logger from '../logger';
 

@@ -18,17 +18,29 @@ export const config = {
   botToken: getEnvVariable('BOT_TOKEN'),
   clientId: getEnvVariable('CLIENT_ID'),
   guildId: getEnvVariable('GUILD_ID'),
-  supabaseUrl: getEnvVariable('SUPABASE_URL'),
-  supabaseAnonKey: getEnvVariable('SUPABASE_ANON_KEY'),
+  // Replace Supabase vars with DATABASE_URL
+  databaseUrl: getEnvVariable('DATABASE_URL'), // e.g., postgresql://user:password@host:port/database
   designatedChannelId: getEnvVariable('DESIGNATED_CHANNEL_ID'), // Add this to your .env file!
   botOwnerId: getEnvVariable('BOT_OWNER_ID', false), // Optional
 };
 
 // Validate DESIGNATED_CHANNEL_ID specifically
 if (!config.designatedChannelId) {
-    logger.warn('DESIGNATED_CHANNEL_ID is not set in .env. Some features might require it.');
-    // Depending on strictness, you might want to exit here too if it's absolutely required.
-    // process.exit(1);
+  logger.warn(
+    'DESIGNATED_CHANNEL_ID is not set in .env. Some features might require it.',
+  );
+  // Depending on strictness, you might want to exit here too if it's absolutely required.
+  // process.exit(1);
+}
+
+// Validate Database URL format (basic check)
+try {
+  new URL(config.databaseUrl);
+} catch (e) {
+  logger.error(
+    `Invalid DATABASE_URL format: ${config.databaseUrl}. It should be like postgresql://user:password@host:port/database`,
+  );
+  process.exit(1);
 }
 
 logger.info('Configuration loaded successfully.');

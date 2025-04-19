@@ -1,16 +1,16 @@
 // src/handlers/statsCommand.ts
 import type { CommandInteraction, User } from 'discord.js';
 import { EmbedBuilder, MessageFlags, PermissionFlagsBits } from 'discord.js';
-import { supabase } from '../supabase';
-import type { InjectionRecord } from '../supabase';
+// Import the NEW function instead of supabase
+import { getAllUserRecords } from '../database';
+import type { InjectionRecord } from '../database'; // Use type from database.ts
 import logger from '../logger';
 
 export async function handleStatsCommand(interaction: CommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  // Get the user option data slightly differently
-  const userOption = interaction.options.get('user'); // Get the raw option
-  const targetUserFromOption = userOption?.user; // Access the user property
+  const userOption = interaction.options.get('user');
+  const targetUserFromOption = userOption?.user;
 
   let userIdToCheck: string;
   let userToCheck: User;
@@ -33,45 +33,52 @@ export async function handleStatsCommand(interaction: CommandInteraction) {
     userIdToCheck = targetUserFromOption.id;
     userToCheck = targetUserFromOption;
   } else {
-    // Default to the user running the command
     userIdToCheck = interaction.user.id;
     userToCheck = interaction.user;
   }
 
-  // Rest of the function remains the same...
-  const result = await supabase
-    .from('injections')
-    .select<string, InjectionRecord>('*')
-    .eq('user_id', userIdToCheck)
-    .order('created_at', { ascending: true });
+  // Use the new function to get all records for the user
+  const records: InjectionRecord[] = await getAllUserRecords(userIdToCheck);
 
-  if (result.error) {
-    logger.error('Error fetching statistics:', {
-      userId: userIdToCheck,
-      message: result.error.message,
-    });
-    await interaction.editReply(
-      `Error fetching statistics for ${userToCheck.username}. Please try again later.`,
-    );
-    return;
-  }
-
-  const records = result.data;
+  // Check if records is null or empty (getAllUserRecords returns [] on error)
   if (!records || records.length === 0) {
-    await interaction.editReply(
-      `${userToCheck.username} has no injection records.`,
-    );
+    if (records === null) {
+      // Indicates potential fetch error
+      logger.error('Error fetching statistics for stats command', {
+        userId: userIdToCheck,
+      });
+      await interaction.editReply(
+        `Error fetching statistics for ${userToCheck.username}. Please try again later.`,
+      );
+    } else {
+      // Empty array means no records
+      await interaction.editReply(
+        `${userToCheck.username} has no injection records.`,
+      );
+    }
     return;
   }
 
+  // Calculation logic remains largely the same, but uses the 'records' array directly
   const total = records.length;
   let currentStreak = 0;
   if (records.length > 0) {
-    currentStreak = 1;
+    currentStreak = 1; // Start with 1 assuming the last record is the start of a potential streak
+    // Iterate backwards from the second-to-last record
     for (let i = records.length - 1; i > 0; i--) {
       try {
+        // Ensure created_at exists and is a valid date string/object
+        if (!records[i]?.created_at || !records[i - 1]?.created_at) {
+          logger.warn(
+            `Missing created_at date during streak calculation for user ${userIdToCheck}:`,
+            { record_i: records[i], record_i_1: records[i - 1] },
+          );
+          break; // Skip calculation if dates are missing
+        }
+
         const current = new Date(records[i].created_at);
         const prev = new Date(records[i - 1].created_at);
+
         if (isNaN(current.getTime()) || isNaN(prev.getTime())) {
           logger.warn(
             `Invalid date encountered during streak calculation for user ${userIdToCheck}:`,
@@ -79,11 +86,16 @@ export async function handleStatsCommand(interaction: CommandInteraction) {
           );
           break;
         }
-        const diffDays =
-          (current.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24);
+
+        // Calculate difference in days (consider timezones might slightly affect this edge case logic)
+        const diffTime = current.getTime() - prev.getTime();
+        const diffDays = diffTime / (1000 * 60 * 60 * 24);
+
+        // Check if the gap is more than 0 days and less than or equal to 8 days (allowing for some flexibility around a week)
         if (diffDays > 0 && diffDays <= 8) {
           currentStreak++;
         } else {
+          // If the gap is too large, the streak breaks
           break;
         }
       } catch (dateError) {
@@ -91,7 +103,7 @@ export async function handleStatsCommand(interaction: CommandInteraction) {
           `Error processing dates during streak calculation for user ${userIdToCheck}:`,
           dateError,
         );
-        break;
+        break; // Stop calculation on error
       }
     }
   }

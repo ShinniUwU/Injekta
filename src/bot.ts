@@ -1,5 +1,5 @@
 // src/bot.ts
-import { Client, GatewayIntentBits, Partials, MessageFlags } from 'discord.js'; // Import MessageFlags here
+import { Client, GatewayIntentBits, Partials, MessageFlags } from 'discord.js';
 import { config } from './config';
 import { refreshCommands } from './commands';
 import { handleInjectionCommand } from './handlers/injectionCommand';
@@ -8,6 +8,9 @@ import { handleNextInjectionCommand } from './handlers/nextInjectionCommand';
 import { handleSetInjectionScheduleCommand } from './handlers/setInjectionScheduleCommand';
 import { handleStatsCommand } from './handlers/statsCommand';
 import { handleLogforCommand } from './handlers/logforCommand';
+// Import new handlers
+import { handleAdminDeleteLogCommand } from './handlers/adminDeleteLogCommand';
+import { handleDeleteMyLogCommand } from './handlers/deleteMyLogCommand';
 import { initializeScheduler, rescheduleJobs } from './scheduler';
 import logger from './logger';
 
@@ -15,13 +18,14 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.MessageContent, // Make sure this is intended/needed
     GatewayIntentBits.GuildMessageReactions,
   ],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
 client.once('ready', async () => {
+  // ... existing ready logic ...
   if (!client.user) {
     logger.error('Client user is not available on ready event.');
     process.exit(1);
@@ -31,7 +35,8 @@ client.once('ready', async () => {
     await refreshCommands(config.clientId, config.guildId, config.botToken);
     logger.info('Attempting to initialize scheduler...');
     await initializeScheduler(client);
-    logger.info('Scheduler initialized successfully.');
+    // Check if scheduler started correctly now
+    // logger.info('Scheduler initialization process completed.');
   } catch (error) {
     logger.error('Error during initialization:', error);
   }
@@ -52,6 +57,7 @@ client.on('interactionCreate', async (interaction) => {
         await handleNextInjectionCommand(interaction);
         break;
       case 'setinjectionschedule':
+        // Ensure rescheduleJobs is passed correctly
         await handleSetInjectionScheduleCommand(interaction, rescheduleJobs);
         break;
       case 'stats':
@@ -60,8 +66,14 @@ client.on('interactionCreate', async (interaction) => {
       case 'logfor':
         await handleLogforCommand(interaction);
         break;
+      // Add cases for new commands
+      case 'admindeletelog':
+        await handleAdminDeleteLogCommand(interaction);
+        break;
+      case 'deletemylog':
+        await handleDeleteMyLogCommand(interaction);
+        break;
       default:
-        // Use imported MessageFlags
         await interaction.reply({
           content: 'Unknown command.',
           flags: MessageFlags.Ephemeral,
@@ -69,12 +81,11 @@ client.on('interactionCreate', async (interaction) => {
         break;
     }
   } catch (error) {
-    logger.error(
-      `Error handling interaction ${interaction.commandName}:`,
-      error,
-    );
+    logger.error(`Error handling interaction ${interaction.commandName}:`, {
+      interactionError: error,
+    });
+    // Ensure replies use flags or followUp correctly
     if (interaction.deferred || interaction.replied) {
-      // No need for flags in followUp typically, make ephemeral if desired
       await interaction
         .followUp({
           content: 'There was an error processing your command.',
@@ -82,7 +93,6 @@ client.on('interactionCreate', async (interaction) => {
         })
         .catch((e) => logger.error('Failed to follow up error', e));
     } else {
-      // Use imported MessageFlags
       await interaction
         .reply({
           content: 'There was an error processing your command.',
@@ -94,6 +104,6 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.login(config.botToken).catch((error) => {
-  logger.error('Failed to login to Discord:', error);
+  logger.error('Failed to login to Discord:', { loginError: error });
   process.exit(1);
 });
