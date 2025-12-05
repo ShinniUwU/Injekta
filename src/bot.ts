@@ -18,6 +18,7 @@ import { handleConvertUnitsCommand } from './handlers/convertUnitsCommand';
 import { handleSetHormoneTestCommand } from './handlers/setHormoneTestCommand';
 import { handleHelpCommand } from './handlers/helpCommand';
 import { handleSetupCheckCommand } from './handlers/setupCheckCommand';
+import { notifyIfOutdated } from './versionCheck';
 
 const client = new Client({
   intents: [
@@ -40,6 +41,7 @@ client.once('ready', async () => {
     await refreshCommands(config.clientId, config.guildId, config.botToken);
     logger.info('Attempting to initialize scheduler...');
     await initializeScheduler(client);
+    void notifyIfOutdated(client);
     // Check if scheduler started correctly now
     // logger.info('Scheduler initialization process completed.');
   } catch (error) {

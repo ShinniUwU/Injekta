@@ -164,36 +164,39 @@ Replace placeholders like `<user>`, `<password>`, `<host>`, `<port>`, `<database
     pm2 stop injekta
     ```
 
-### Quick start (for community members)
+### Quick start (community members)
 
-- Go to your server's HRT or injection log channel (ask a mod if you are unsure).
-- Run `/help` for a friendly walkthrough.
-- Log your shot with `/injection` and tap Confirm; dose/medication can be left blank if you are unsure.
-- Use `/nextinjection` to see when you are due and `/checklogs` to view what you have saved. `/deletemylog` undoes mistakes.
-- What is stored: your Discord ID, timestamps, which leg, and any optional medication/dose/units you share. Bot replies are private to you. This is a tracking/reminder tool, not medical advice.
+- Go to your server’s HRT/injection channel, run `/help`, and log with `/injection` (dose/medication optional).
+- `/nextinjection` shows when you’re due; `/checklogs` shows your last five; `/deletemylog` fixes mistakes.
+- Stored: your Discord ID, timestamps, leg, and any optional medication/dose/units you provide. Replies stay private. This is a tracking/reminder tool, not medical advice.
 
-### Quick setup (for non-technical admins)
+### Setup (admins, minimal steps)
 
-- Copy `.env.example` to `.env` and fill in your bot token, client ID, guild ID, database URL, and the channel you want for logging injections.
-- Create the database with `schema.sql` (ask a friend to run the provided `psql` command if you are not comfortable with terminals).
-- Install dependencies with `bun install` (or `npm install`).
-- Start the bot with `bun run dev` and run `/setupcheck` (Admin-only) in your server to confirm database and channel are wired up.
-- Use `/setinjectionschedule` so reminders and `/nextinjection` work for everyone. `/sethormonetest` is optional for lab reminders.
+1) Copy `.env.example` → `.env`; fill BOT_TOKEN, CLIENT_ID, GUILD_ID, DATABASE_URL, DESIGNATED_CHANNEL_ID (and optional VERSION_NOTIFY_CHANNEL_ID).  
+2) Run `bun install`.  
+3) Create DB tables with `schema.sql` (e.g., `psql ... -f schema.sql`).  
+4) Start the bot: `bun run dev`.  
+5) In Discord, run `/setupcheck` to verify DB/channel.  
+6) Run `/setinjectionschedule` once so reminders and `/nextinjection` work. `/sethormonetest` is optional.
 
-### Available Commands
+### Update alerts
 
-  * `/injection [dose_mg] [medication] [performed_at] [raw_units]`: Log your injection (requires confirmation). Must be used in the designated channel. Use `performed_at` to backfill and optionally log raw syringe units.
-  * `/help`: Friendly quickstart and tips for transfem/transmasc users.
-  * `/setupcheck`: Admin-only checklist for database + channel configuration.
-  * `/checklogs [user]`: Display the last 5 injection logs for yourself or the specified user (user option requires Admin permissions).
-  * `/stats [user]`: Show injection statistics (total logs, current streak) for yourself or the specified user (user option requires Admin permissions).
-  * `/nextinjection`: Check the approximate time remaining until the next scheduled injection based on the global schedule.
-  * `/deletemylog [log_id]`: Delete one of your own log entries. If `log_id` is provided, deletes that specific entry. If omitted, deletes your most recent entry (requires confirmation).
-  * `/setinjectionschedule <day> <time> [timezone] [interval_days] [medication] [dose_mg]` (Admin-only): Set the global injection schedule (day of week, HH:MM time, optional IANA timezone like 'UTC' or 'America/New\_York', interval in days to allow cadences like 3.5d/10d/30d, optional default medication/dose for reminders).
-  * `/sethormonetest [start_date] [interval_days] [timezone]` (Admin-only): Set E/T lab reminders starting from now or a specific date, repeating every N days (default 30).
-  * `/logfor <user> [dose_mg] [medication]` (Admin-only): Log an injection for the specified user.
-  * `/convertunits <units> <concentration_mg_per_ml>`: Convert syringe units to mg (assumes 100 units = 1 mL).
-  * `/admindeletelog <user> <log_id>` (Admin-only): Delete a specific log entry (using its unique ID) for the specified user.
+- The bot checks npm for a newer Injekta version on startup. If found, it posts in the configured channel with update instructions (`git pull && bun install` + restart).
+
+### Web option
+
+- A lightweight site lives in `site/` (moving to its own branch). Runs on Vercel + Neon Postgres. See `site/README.md` if you want a click-to-deploy web logger.
+
+### Commands (quick list)
+
+- `/injection [dose_mg] [medication] [performed_at] [raw_units]`
+- `/help` · `/setupcheck` (admin) · `/checklogs [user]` · `/stats [user]`
+- `/nextinjection` · `/deletemylog [log_id]`
+- `/setinjectionschedule <day> <time> [timezone] [interval_days] [medication] [dose_mg]` (admin)
+- `/sethormonetest [start_date] [interval_days] [timezone]` (admin)
+- `/logfor <user> [dose_mg] [medication]` (admin)
+- `/convertunits <units> <concentration_mg_per_ml>`
+- `/admindeletelog <user> <log_id>` (admin)
 
 ## Development
 

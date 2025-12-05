@@ -14,13 +14,18 @@ function getEnvVariable(key: string, required: boolean = true): string {
   return value || ''; // Return empty string if optional and not set
 }
 
+const designatedChannelId = getEnvVariable('DESIGNATED_CHANNEL_ID'); // Add this to your .env file!
+const versionNotifyChannelId =
+  getEnvVariable('VERSION_NOTIFY_CHANNEL_ID', false) || designatedChannelId;
+
 export const config = {
   botToken: getEnvVariable('BOT_TOKEN'),
   clientId: getEnvVariable('CLIENT_ID'),
   guildId: getEnvVariable('GUILD_ID'),
   // Replace Supabase vars with DATABASE_URL
   databaseUrl: getEnvVariable('DATABASE_URL'), // e.g., postgresql://user:password@host:port/database
-  designatedChannelId: getEnvVariable('DESIGNATED_CHANNEL_ID'), // Add this to your .env file!
+  designatedChannelId,
+  versionNotifyChannelId,
   botOwnerId: getEnvVariable('BOT_OWNER_ID', false), // Optional
 };
 
