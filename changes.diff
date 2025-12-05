@@ -1,1819 +1,2077 @@
+diff --git a/.env.example b/.env.example
+index 40f38bb..6f02682 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,12 +1,13 @@
+ # Discord Bot Credentials
+-BOT_TOKEN=your_discord_bot_token_here
+-CLIENT_ID=your_discord_app_client_id_here
+-GUILD_ID=your_discord_server_id_for_testing_here
++# Copy this file to .env and fill in your real values
++BOT_TOKEN=your_discord_bot_token
++CLIENT_ID=your_discord_client_id
++GUILD_ID=your_discord_guild_id
+ 
+ # PostgreSQL Database Connection URL
+ # Format: postgresql://<user>:<password>@<host>:<port>/<database_name>
+-DATABASE_URL=postgresql://injekta_user:your_secure_password@localhost:5432/injekta_db
++DATABASE_URL=postgresql://injekta_user:strongpassword@localhost:5432/injekta_db
+ 
+ # Bot Configuration
+-DESIGNATED_CHANNEL_ID=your_discord_channel_id_for_reminders
+-# BOT_OWNER_ID=your_discord_user_id (Optional)
++DESIGNATED_CHANNEL_ID=your_discord_channel_id_for_injection_logs
++BOT_OWNER_ID=your_discord_user_id
 diff --git a/README.md b/README.md
-index a8e130d..ba5ca65 100644
+index ba5ca65..f3891c1 100644
 --- a/README.md
 +++ b/README.md
-@@ -1,18 +1,20 @@
- # Injekta
+@@ -164,9 +164,27 @@ Replace placeholders like `<user>`, `<password>`, `<host>`, `<port>`, `<database
+     pm2 stop injekta
+     ```
  
- [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
--**Injekta** is a Discord bot built with TypeScript designed to help manage and track Hormone Replacement Therapy (HRT) injections. It logs injection data (alternating between 'Right' and 'Left' legs), automatically keeps only the last 5 records per user, and sends weekly reminders—all integrated with a **self-hosted PostgreSQL database** for persistent data storage.
-+**Injekta** is a Discord bot built with TypeScript designed to help manage and track Hormone Replacement Therapy (HRT) injections. It logs injection data (alternating between 'Right' and 'Left' legs), tracks medication and dose, supports flexible cadences (e.g., every 3.5 days, 10 days, or monthly), automatically keeps only the last 5 records per user, and sends reminders—all integrated with a **self-hosted PostgreSQL database** for persistent data storage.
- 
- ## Features
- 
--- **Simple Logging:** Log injections easily using the `/injection` command with button confirmation.
-+- **Simple Logging:** Log injections easily using the `/injection` command with button confirmation; optionally record medication name and dose (mg).
- - **Automatic Leg Alternation:** The bot automatically determines whether the 'Right' or 'Left' leg is next based on your previous log.
--- **Log History:** View your last 5 injection logs using `/checklogs`. Older logs are automatically removed.
-+- **Log History:** View your last 5 injection logs using `/checklogs` (now includes medication and dose). Older logs are automatically removed.
- - **Stats Tracking:** Check your total logged injections and current weekly streak with `/stats`.
- - **Scheduling & Reminders:**
--  - Set a global injection schedule (day, time, timezone) using `/setinjectionschedule` (Admin-only).
--  * Receive automatic reminders 1 hour before the scheduled time in a designated channel.
-+  - Set a global injection schedule (day, time, timezone, interval) using `/setinjectionschedule` (Admin-only) with non-weekly cadences like every 3.5 days or every 10/30 days.
-+  * Receive automatic reminders 1 hour before the scheduled time in a designated channel, including medication name and dose.
-   * Receive a prompt in the designated channel when it's time to log your injection.
-+- **Hormone Test Reminders:** Set monthly (or custom interval) E/T lab reminders starting from a chosen date using `/sethormonetest`.
-+- **Dosing Helpers:** Convert syringe units to mg with `/convertunits` (requires vial concentration).
- - **Log Deletion:**
-     - Users can delete their own latest log (or a specific one by ID) using `/deletemylog` (with confirmation).
-     - Admins can delete any specific log entry for any user using `/admindeletelog`.
-@@ -100,6 +102,13 @@ This bot requires a running PostgreSQL database server.
-     *(Example: `psql -h localhost -p 5432 -U injekta_user -d injekta_db -f schema.sql`)*
-     Enter the password for `injekta_user` when prompted.
- 
-+    > Upgrading from an older schema? Run the following before the bot restarts to migrate `injection_date` from the old `DD-MM-YYYY` string to a proper timestamptz:
-+    > ```sql
-+    > ALTER TABLE injections
-+    >   ALTER COLUMN injection_date TYPE TIMESTAMPTZ USING to_timestamp(injection_date, 'DD-MM-YYYY'),
-+    >   ALTER COLUMN injection_date SET DEFAULT CURRENT_TIMESTAMP;
-+    > ```
++### Quick start (for community members)
 +
- ## Configuration
- 
- ### Environment Variables
-@@ -123,6 +132,8 @@ BOT_OWNER_ID=your_discord_user_id              # Optional: Your Discord user ID
- 
- Replace placeholders like `<user>`, `<password>`, `<host>`, `<port>`, `<database_name>` in `DATABASE_URL` with the actual values for your PostgreSQL setup created in the [Database Setup](https://www.google.com/search?q=%23database-setup) step.
- 
-+**Timezone:** `/setinjectionschedule` validates the timezone you pass (IANA names like `UTC`, `America/New_York`). Invalid values are rejected and scheduler falls back to UTC if misconfigured.
++- Go to your server's HRT or injection log channel (ask a mod if you are unsure).
++- Run `/help` for a friendly walkthrough.
++- Log your shot with `/injection` and tap Confirm; dose/medication can be left blank if you are unsure.
++- Use `/nextinjection` to see when you are due and `/checklogs` to view what you have saved. `/deletemylog` undoes mistakes.
++- What is stored: your Discord ID, timestamps, which leg, and any optional medication/dose/units you share. Bot replies are private to you. This is a tracking/reminder tool, not medical advice.
 +
- ## Usage
- 
- ### Running the Bot
-@@ -155,13 +166,15 @@ Replace placeholders like `<user>`, `<password>`, `<host>`, `<port>`, `<database
- 
++### Quick setup (for non-technical admins)
++
++- Copy `.env.example` to `.env` and fill in your bot token, client ID, guild ID, database URL, and the channel you want for logging injections.
++- Create the database with `schema.sql` (ask a friend to run the provided `psql` command if you are not comfortable with terminals).
++- Install dependencies with `bun install` (or `npm install`).
++- Start the bot with `bun run dev` and run `/setupcheck` (Admin-only) in your server to confirm database and channel are wired up.
++- Use `/setinjectionschedule` so reminders and `/nextinjection` work for everyone. `/sethormonetest` is optional for lab reminders.
++
  ### Available Commands
  
--  * `/injection`: Log your weekly injection (requires confirmation). Must be used in the designated channel.
-+  * `/injection [dose_mg] [medication] [performed_at] [raw_units]`: Log your injection (requires confirmation). Must be used in the designated channel. Use `performed_at` to backfill and optionally log raw syringe units.
+   * `/injection [dose_mg] [medication] [performed_at] [raw_units]`: Log your injection (requires confirmation). Must be used in the designated channel. Use `performed_at` to backfill and optionally log raw syringe units.
++  * `/help`: Friendly quickstart and tips for transfem/transmasc users.
++  * `/setupcheck`: Admin-only checklist for database + channel configuration.
    * `/checklogs [user]`: Display the last 5 injection logs for yourself or the specified user (user option requires Admin permissions).
    * `/stats [user]`: Show injection statistics (total logs, current streak) for yourself or the specified user (user option requires Admin permissions).
    * `/nextinjection`: Check the approximate time remaining until the next scheduled injection based on the global schedule.
-   * `/deletemylog [log_id]`: Delete one of your own log entries. If `log_id` is provided, deletes that specific entry. If omitted, deletes your most recent entry (requires confirmation).
--  * `/setinjectionschedule <day> <time> [timezone]` (Admin-only): Set the global injection schedule (day of week, HH:MM time, optional IANA timezone like 'UTC' or 'America/New\_York').
--  * `/logfor <user>` (Admin-only): Log an injection for the specified user.
-+  * `/setinjectionschedule <day> <time> [timezone] [interval_days] [medication] [dose_mg]` (Admin-only): Set the global injection schedule (day of week, HH:MM time, optional IANA timezone like 'UTC' or 'America/New\_York', interval in days to allow cadences like 3.5d/10d/30d, optional default medication/dose for reminders).
-+  * `/sethormonetest [start_date] [interval_days] [timezone]` (Admin-only): Set E/T lab reminders starting from now or a specific date, repeating every N days (default 30).
-+  * `/logfor <user> [dose_mg] [medication]` (Admin-only): Log an injection for the specified user.
-+  * `/convertunits <units> <concentration_mg_per_ml>`: Convert syringe units to mg (assumes 100 units = 1 mL).
-   * `/admindeletelog <user> <log_id>` (Admin-only): Delete a specific log entry (using its unique ID) for the specified user.
- 
- ## Development
-diff --git a/bun.lockb b/bun.lockb
-index f5925c4..74d0a6b 100755
-Binary files a/bun.lockb and b/bun.lockb differ
-diff --git a/package.json b/package.json
-index 55cbece..abdab20 100644
---- a/package.json
-+++ b/package.json
-@@ -8,6 +8,7 @@
-     "dev": "bun run src/bot.ts",
-     "build": "tsc",
-     "lint": "eslint . --ext .ts,.tsx",
-+    "test": "jest",
-     "prettier-check": "prettier --check .",
-     "prettier-write": "prettier --write ."
-   },
-@@ -16,6 +17,7 @@
-     "@types/node-cron": "^3.0.11",
-     "discord.js": "^14.18.0",
-     "dotenv": "^16.4.7",
-+    "luxon": "^3.5.0",
-     "node-cron": "^3.0.3",
-     "pg": "^8.14.1",
-     "winston": "^3.17.0"
-@@ -29,6 +31,7 @@
-     "eslint": "^8.42.0",
-     "husky": "^9.1.7",
-     "jest": "^29.2.2",
-+    "@types/luxon": "^3.7.1",
-     "lint-staged": "^15.4.3",
-     "prettier": "^2.8.8",
-     "ts-jest": "^29.0.5",
-diff --git a/schema.sql b/schema.sql
-index 9343beb..6597dd0 100644
---- a/schema.sql
-+++ b/schema.sql
-@@ -6,20 +6,36 @@ CREATE TABLE IF NOT EXISTS injections (
-     id SERIAL PRIMARY KEY,                      -- Auto-incrementing integer ID
-     user_id VARCHAR(255) NOT NULL,              -- Discord User ID
-     leg VARCHAR(10) NOT NULL CHECK (leg IN ('Right', 'Left')), -- Ensures only 'Right' or 'Left'
--    injection_date VARCHAR(10) NOT NULL,        -- Stores date as DD-MM-YYYY string
-+    injection_date TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, -- Timestamp with timezone for the injection
-+    performed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, -- When the injection actually happened
-+    medication VARCHAR(100),                    -- Medication name (e.g., estradiol, progesterone)
-+    dose_mg NUMERIC(10,2),                      -- Dose in mg for this injection
-+    raw_units INT,                              -- Optional raw syringe units as logged
-+    created_by_admin_id VARCHAR(255),           -- Admin who logged on behalf of a user
-     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP -- Timestamp with timezone for sorting
- );
- 
- -- Add indexes for faster lookups
- CREATE INDEX IF NOT EXISTS idx_injections_user_id ON injections(user_id);
- CREATE INDEX IF NOT EXISTS idx_injections_created_at ON injections(created_at);
-+CREATE INDEX IF NOT EXISTS idx_injections_performed_at ON injections(performed_at);
-+CREATE INDEX IF NOT EXISTS idx_injections_medication ON injections(medication);
- 
- -- Create the global settings table
- CREATE TABLE IF NOT EXISTS global_settings (
-     id INT PRIMARY KEY CHECK (id = 1),          -- Enforce only one row with id = 1
-     injection_day INT NOT NULL CHECK (injection_day >= 0 AND injection_day <= 6), -- 0 (Sun) to 6 (Sat)
-     injection_time VARCHAR(5) NOT NULL CHECK (injection_time ~ '^[0-2]\d:[0-5]\d$'), -- HH:MM format
--    timezone VARCHAR(100) NOT NULL DEFAULT 'UTC' -- IANA timezone name (e.g., 'UTC', 'America/New_York')
-+    timezone VARCHAR(100) NOT NULL DEFAULT 'UTC', -- IANA timezone name (e.g., 'UTC', 'America/New_York')
-+    interval_days NUMERIC(6,2) NOT NULL DEFAULT 7, -- Flexible cadence (e.g., 3.5 days, 10 days, 30 days)
-+    start_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, -- Anchor for interval-based scheduling
-+    medication VARCHAR(100) DEFAULT 'Injection', -- Medication name for reminders
-+    dose_mg NUMERIC(10,2), -- Default dose in mg for reminders
-+    test_start_time TIMESTAMPTZ,              -- Anchor for hormone test reminders
-+    test_interval_days NUMERIC(6,2) DEFAULT 30, -- Interval for hormone test reminders (e.g., 30 days)
-+    test_timezone VARCHAR(100) DEFAULT 'UTC', -- Timezone for hormone test reminders
-+    last_run_at TIMESTAMPTZ,                 -- Scheduler last run (injection reminders)
-+    test_last_run_at TIMESTAMPTZ             -- Scheduler last run (test reminders)
- );
- 
- -- Optional: Insert a default settings row if it doesn't exist.
-@@ -33,5 +49,39 @@ CREATE TABLE IF NOT EXISTS global_settings (
- COMMENT ON TABLE injections IS 'Stores individual injection records for users.';
- COMMENT ON TABLE global_settings IS 'Stores the global injection schedule settings (only row with id=1 is used).';
- 
-+-- Admin action audit log
-+CREATE TABLE IF NOT EXISTS admin_actions (
-+    id SERIAL PRIMARY KEY,
-+    admin_user_id VARCHAR(255) NOT NULL,
-+    target_user_id VARCHAR(255),
-+    action VARCHAR(50) NOT NULL,
-+    log_id INT,
-+    details TEXT,
-+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-+);
-+
-+CREATE INDEX IF NOT EXISTS idx_admin_actions_admin ON admin_actions(admin_user_id);
-+
-+-- Migration hint (run manually on existing DB):
-+-- ALTER TABLE injections
-+--   ALTER COLUMN injection_date TYPE TIMESTAMPTZ USING to_timestamp(injection_date, 'DD-MM-YYYY'),
-+--   ALTER COLUMN injection_date SET DEFAULT CURRENT_TIMESTAMP,
-+--   ADD COLUMN IF NOT EXISTS performed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-+--   ADD COLUMN IF NOT EXISTS medication VARCHAR(100),
-+--   ADD COLUMN IF NOT EXISTS dose_mg NUMERIC(10,2),
-+--   ADD COLUMN IF NOT EXISTS raw_units INT,
-+--   ADD COLUMN IF NOT EXISTS created_by_admin_id VARCHAR(255);
-+--
-+-- ALTER TABLE global_settings
-+--   ADD COLUMN IF NOT EXISTS interval_days NUMERIC(6,2) NOT NULL DEFAULT 7,
-+--   ADD COLUMN IF NOT EXISTS start_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-+--   ADD COLUMN IF NOT EXISTS medication VARCHAR(100) DEFAULT 'Injection',
-+--   ADD COLUMN IF NOT EXISTS dose_mg NUMERIC(10,2),
-+--   ADD COLUMN IF NOT EXISTS test_start_time TIMESTAMPTZ,
-+--   ADD COLUMN IF NOT EXISTS test_interval_days NUMERIC(6,2) DEFAULT 30,
-+--   ADD COLUMN IF NOT EXISTS test_timezone VARCHAR(100) DEFAULT 'UTC';
-+--   ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMPTZ,
-+--   ADD COLUMN IF NOT EXISTS test_last_run_at TIMESTAMPTZ;
-+
- -- Log completion
- \echo 'Schema setup script completed.'
+diff --git a/__tests__/time.test.ts b/__tests__/time.test.ts
+index 1deadba..79dce42 100644
+--- a/__tests__/time.test.ts
++++ b/__tests__/time.test.ts
+@@ -23,6 +23,11 @@ describe('time utilities', () => {
+       start_time: '2024-01-01T10:00:00Z',
+       medication: null,
+       dose_mg: null,
++      test_start_time: null,
++      test_interval_days: null,
++      test_timezone: 'UTC',
++      last_run_at: null,
++      test_last_run_at: null,
+     };
+     const now = DateTime.fromISO('2024-01-01T09:00:00', { zone: 'UTC' }); // Monday 9 AM
+     const next = getNextInjectionDateTime(settings, now);
+@@ -40,6 +45,11 @@ describe('time utilities', () => {
+       start_time: '2024-01-01T10:00:00Z',
+       medication: null,
+       dose_mg: null,
++      test_start_time: null,
++      test_interval_days: null,
++      test_timezone: 'UTC',
++      last_run_at: null,
++      test_last_run_at: null,
+     };
+     const now = DateTime.fromISO('2024-01-01T11:00:00', { zone: 'UTC' }); // Monday 11 AM
+     const next = getNextInjectionDateTime(settings, now);
+@@ -57,6 +67,11 @@ describe('time utilities', () => {
+       start_time: '2024-01-01T10:00:00Z',
+       medication: null,
+       dose_mg: null,
++      test_start_time: null,
++      test_interval_days: null,
++      test_timezone: 'UTC',
++      last_run_at: null,
++      test_last_run_at: null,
+     };
+     const now = DateTime.fromISO('2024-01-02T10:00:00', { zone: 'UTC' }); // 1 day later
+     const next = getNextInjectionDateTime(settings, now);
+diff --git a/changes.diff b/changes.diff
+index 00d03b5..e643092 100644
+--- a/changes.diff
++++ b/changes.diff
+@@ -1,1819 +0,0 @@
+-diff --git a/README.md b/README.md
+-index a8e130d..ba5ca65 100644
+---- a/README.md
+-+++ b/README.md
+-@@ -1,18 +1,20 @@
+- # Injekta
+- 
+- [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+--**Injekta** is a Discord bot built with TypeScript designed to help manage and track Hormone Replacement Therapy (HRT) injections. It logs injection data (alternating between 'Right' and 'Left' legs), automatically keeps only the last 5 records per user, and sends weekly reminders—all integrated with a **self-hosted PostgreSQL database** for persistent data storage.
+-+**Injekta** is a Discord bot built with TypeScript designed to help manage and track Hormone Replacement Therapy (HRT) injections. It logs injection data (alternating between 'Right' and 'Left' legs), tracks medication and dose, supports flexible cadences (e.g., every 3.5 days, 10 days, or monthly), automatically keeps only the last 5 records per user, and sends reminders—all integrated with a **self-hosted PostgreSQL database** for persistent data storage.
+- 
+- ## Features
+- 
+--- **Simple Logging:** Log injections easily using the `/injection` command with button confirmation.
+-+- **Simple Logging:** Log injections easily using the `/injection` command with button confirmation; optionally record medication name and dose (mg).
+- - **Automatic Leg Alternation:** The bot automatically determines whether the 'Right' or 'Left' leg is next based on your previous log.
+--- **Log History:** View your last 5 injection logs using `/checklogs`. Older logs are automatically removed.
+-+- **Log History:** View your last 5 injection logs using `/checklogs` (now includes medication and dose). Older logs are automatically removed.
+- - **Stats Tracking:** Check your total logged injections and current weekly streak with `/stats`.
+- - **Scheduling & Reminders:**
+--  - Set a global injection schedule (day, time, timezone) using `/setinjectionschedule` (Admin-only).
+--  * Receive automatic reminders 1 hour before the scheduled time in a designated channel.
+-+  - Set a global injection schedule (day, time, timezone, interval) using `/setinjectionschedule` (Admin-only) with non-weekly cadences like every 3.5 days or every 10/30 days.
+-+  * Receive automatic reminders 1 hour before the scheduled time in a designated channel, including medication name and dose.
+-   * Receive a prompt in the designated channel when it's time to log your injection.
+-+- **Hormone Test Reminders:** Set monthly (or custom interval) E/T lab reminders starting from a chosen date using `/sethormonetest`.
+-+- **Dosing Helpers:** Convert syringe units to mg with `/convertunits` (requires vial concentration).
+- - **Log Deletion:**
+-     - Users can delete their own latest log (or a specific one by ID) using `/deletemylog` (with confirmation).
+-     - Admins can delete any specific log entry for any user using `/admindeletelog`.
+-@@ -100,6 +102,13 @@ This bot requires a running PostgreSQL database server.
+-     *(Example: `psql -h localhost -p 5432 -U injekta_user -d injekta_db -f schema.sql`)*
+-     Enter the password for `injekta_user` when prompted.
+- 
+-+    > Upgrading from an older schema? Run the following before the bot restarts to migrate `injection_date` from the old `DD-MM-YYYY` string to a proper timestamptz:
+-+    > ```sql
+-+    > ALTER TABLE injections
+-+    >   ALTER COLUMN injection_date TYPE TIMESTAMPTZ USING to_timestamp(injection_date, 'DD-MM-YYYY'),
+-+    >   ALTER COLUMN injection_date SET DEFAULT CURRENT_TIMESTAMP;
+-+    > ```
+-+
+- ## Configuration
+- 
+- ### Environment Variables
+-@@ -123,6 +132,8 @@ BOT_OWNER_ID=your_discord_user_id              # Optional: Your Discord user ID
+- 
+- Replace placeholders like `<user>`, `<password>`, `<host>`, `<port>`, `<database_name>` in `DATABASE_URL` with the actual values for your PostgreSQL setup created in the [Database Setup](https://www.google.com/search?q=%23database-setup) step.
+- 
+-+**Timezone:** `/setinjectionschedule` validates the timezone you pass (IANA names like `UTC`, `America/New_York`). Invalid values are rejected and scheduler falls back to UTC if misconfigured.
+-+
+- ## Usage
+- 
+- ### Running the Bot
+-@@ -155,13 +166,15 @@ Replace placeholders like `<user>`, `<password>`, `<host>`, `<port>`, `<database
+- 
+- ### Available Commands
+- 
+--  * `/injection`: Log your weekly injection (requires confirmation). Must be used in the designated channel.
+-+  * `/injection [dose_mg] [medication] [performed_at] [raw_units]`: Log your injection (requires confirmation). Must be used in the designated channel. Use `performed_at` to backfill and optionally log raw syringe units.
+-   * `/checklogs [user]`: Display the last 5 injection logs for yourself or the specified user (user option requires Admin permissions).
+-   * `/stats [user]`: Show injection statistics (total logs, current streak) for yourself or the specified user (user option requires Admin permissions).
+-   * `/nextinjection`: Check the approximate time remaining until the next scheduled injection based on the global schedule.
+-   * `/deletemylog [log_id]`: Delete one of your own log entries. If `log_id` is provided, deletes that specific entry. If omitted, deletes your most recent entry (requires confirmation).
+--  * `/setinjectionschedule <day> <time> [timezone]` (Admin-only): Set the global injection schedule (day of week, HH:MM time, optional IANA timezone like 'UTC' or 'America/New\_York').
+--  * `/logfor <user>` (Admin-only): Log an injection for the specified user.
+-+  * `/setinjectionschedule <day> <time> [timezone] [interval_days] [medication] [dose_mg]` (Admin-only): Set the global injection schedule (day of week, HH:MM time, optional IANA timezone like 'UTC' or 'America/New\_York', interval in days to allow cadences like 3.5d/10d/30d, optional default medication/dose for reminders).
+-+  * `/sethormonetest [start_date] [interval_days] [timezone]` (Admin-only): Set E/T lab reminders starting from now or a specific date, repeating every N days (default 30).
+-+  * `/logfor <user> [dose_mg] [medication]` (Admin-only): Log an injection for the specified user.
+-+  * `/convertunits <units> <concentration_mg_per_ml>`: Convert syringe units to mg (assumes 100 units = 1 mL).
+-   * `/admindeletelog <user> <log_id>` (Admin-only): Delete a specific log entry (using its unique ID) for the specified user.
+- 
+- ## Development
+-diff --git a/bun.lockb b/bun.lockb
+-index f5925c4..74d0a6b 100755
+-Binary files a/bun.lockb and b/bun.lockb differ
+-diff --git a/package.json b/package.json
+-index 55cbece..abdab20 100644
+---- a/package.json
+-+++ b/package.json
+-@@ -8,6 +8,7 @@
+-     "dev": "bun run src/bot.ts",
+-     "build": "tsc",
+-     "lint": "eslint . --ext .ts,.tsx",
+-+    "test": "jest",
+-     "prettier-check": "prettier --check .",
+-     "prettier-write": "prettier --write ."
+-   },
+-@@ -16,6 +17,7 @@
+-     "@types/node-cron": "^3.0.11",
+-     "discord.js": "^14.18.0",
+-     "dotenv": "^16.4.7",
+-+    "luxon": "^3.5.0",
+-     "node-cron": "^3.0.3",
+-     "pg": "^8.14.1",
+-     "winston": "^3.17.0"
+-@@ -29,6 +31,7 @@
+-     "eslint": "^8.42.0",
+-     "husky": "^9.1.7",
+-     "jest": "^29.2.2",
+-+    "@types/luxon": "^3.7.1",
+-     "lint-staged": "^15.4.3",
+-     "prettier": "^2.8.8",
+-     "ts-jest": "^29.0.5",
+-diff --git a/schema.sql b/schema.sql
+-index 9343beb..6597dd0 100644
+---- a/schema.sql
+-+++ b/schema.sql
+-@@ -6,20 +6,36 @@ CREATE TABLE IF NOT EXISTS injections (
+-     id SERIAL PRIMARY KEY,                      -- Auto-incrementing integer ID
+-     user_id VARCHAR(255) NOT NULL,              -- Discord User ID
+-     leg VARCHAR(10) NOT NULL CHECK (leg IN ('Right', 'Left')), -- Ensures only 'Right' or 'Left'
+--    injection_date VARCHAR(10) NOT NULL,        -- Stores date as DD-MM-YYYY string
+-+    injection_date TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, -- Timestamp with timezone for the injection
+-+    performed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, -- When the injection actually happened
+-+    medication VARCHAR(100),                    -- Medication name (e.g., estradiol, progesterone)
+-+    dose_mg NUMERIC(10,2),                      -- Dose in mg for this injection
+-+    raw_units INT,                              -- Optional raw syringe units as logged
+-+    created_by_admin_id VARCHAR(255),           -- Admin who logged on behalf of a user
+-     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP -- Timestamp with timezone for sorting
+- );
+- 
+- -- Add indexes for faster lookups
+- CREATE INDEX IF NOT EXISTS idx_injections_user_id ON injections(user_id);
+- CREATE INDEX IF NOT EXISTS idx_injections_created_at ON injections(created_at);
+-+CREATE INDEX IF NOT EXISTS idx_injections_performed_at ON injections(performed_at);
+-+CREATE INDEX IF NOT EXISTS idx_injections_medication ON injections(medication);
+- 
+- -- Create the global settings table
+- CREATE TABLE IF NOT EXISTS global_settings (
+-     id INT PRIMARY KEY CHECK (id = 1),          -- Enforce only one row with id = 1
+-     injection_day INT NOT NULL CHECK (injection_day >= 0 AND injection_day <= 6), -- 0 (Sun) to 6 (Sat)
+-     injection_time VARCHAR(5) NOT NULL CHECK (injection_time ~ '^[0-2]\d:[0-5]\d$'), -- HH:MM format
+--    timezone VARCHAR(100) NOT NULL DEFAULT 'UTC' -- IANA timezone name (e.g., 'UTC', 'America/New_York')
+-+    timezone VARCHAR(100) NOT NULL DEFAULT 'UTC', -- IANA timezone name (e.g., 'UTC', 'America/New_York')
+-+    interval_days NUMERIC(6,2) NOT NULL DEFAULT 7, -- Flexible cadence (e.g., 3.5 days, 10 days, 30 days)
+-+    start_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, -- Anchor for interval-based scheduling
+-+    medication VARCHAR(100) DEFAULT 'Injection', -- Medication name for reminders
+-+    dose_mg NUMERIC(10,2), -- Default dose in mg for reminders
+-+    test_start_time TIMESTAMPTZ,              -- Anchor for hormone test reminders
+-+    test_interval_days NUMERIC(6,2) DEFAULT 30, -- Interval for hormone test reminders (e.g., 30 days)
+-+    test_timezone VARCHAR(100) DEFAULT 'UTC', -- Timezone for hormone test reminders
+-+    last_run_at TIMESTAMPTZ,                 -- Scheduler last run (injection reminders)
+-+    test_last_run_at TIMESTAMPTZ             -- Scheduler last run (test reminders)
+- );
+- 
+- -- Optional: Insert a default settings row if it doesn't exist.
+-@@ -33,5 +49,39 @@ CREATE TABLE IF NOT EXISTS global_settings (
+- COMMENT ON TABLE injections IS 'Stores individual injection records for users.';
+- COMMENT ON TABLE global_settings IS 'Stores the global injection schedule settings (only row with id=1 is used).';
+- 
+-+-- Admin action audit log
+-+CREATE TABLE IF NOT EXISTS admin_actions (
+-+    id SERIAL PRIMARY KEY,
+-+    admin_user_id VARCHAR(255) NOT NULL,
+-+    target_user_id VARCHAR(255),
+-+    action VARCHAR(50) NOT NULL,
+-+    log_id INT,
+-+    details TEXT,
+-+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+-+);
+-+
+-+CREATE INDEX IF NOT EXISTS idx_admin_actions_admin ON admin_actions(admin_user_id);
+-+
+-+-- Migration hint (run manually on existing DB):
+-+-- ALTER TABLE injections
+-+--   ALTER COLUMN injection_date TYPE TIMESTAMPTZ USING to_timestamp(injection_date, 'DD-MM-YYYY'),
+-+--   ALTER COLUMN injection_date SET DEFAULT CURRENT_TIMESTAMP,
+-+--   ADD COLUMN IF NOT EXISTS performed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+-+--   ADD COLUMN IF NOT EXISTS medication VARCHAR(100),
+-+--   ADD COLUMN IF NOT EXISTS dose_mg NUMERIC(10,2),
+-+--   ADD COLUMN IF NOT EXISTS raw_units INT,
+-+--   ADD COLUMN IF NOT EXISTS created_by_admin_id VARCHAR(255);
+-+--
+-+-- ALTER TABLE global_settings
+-+--   ADD COLUMN IF NOT EXISTS interval_days NUMERIC(6,2) NOT NULL DEFAULT 7,
+-+--   ADD COLUMN IF NOT EXISTS start_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+-+--   ADD COLUMN IF NOT EXISTS medication VARCHAR(100) DEFAULT 'Injection',
+-+--   ADD COLUMN IF NOT EXISTS dose_mg NUMERIC(10,2),
+-+--   ADD COLUMN IF NOT EXISTS test_start_time TIMESTAMPTZ,
+-+--   ADD COLUMN IF NOT EXISTS test_interval_days NUMERIC(6,2) DEFAULT 30,
+-+--   ADD COLUMN IF NOT EXISTS test_timezone VARCHAR(100) DEFAULT 'UTC';
+-+--   ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMPTZ,
+-+--   ADD COLUMN IF NOT EXISTS test_last_run_at TIMESTAMPTZ;
+-+
+- -- Log completion
+- \echo 'Schema setup script completed.'
+-diff --git a/src/bot.ts b/src/bot.ts
+-index 1db7d5f..9ea0fc1 100644
+---- a/src/bot.ts
+-+++ b/src/bot.ts
+-@@ -13,6 +13,9 @@ import { handleAdminDeleteLogCommand } from './handlers/adminDeleteLogCommand';
+- import { handleDeleteMyLogCommand } from './handlers/deleteMyLogCommand';
+- import { initializeScheduler, rescheduleJobs } from './scheduler';
+- import logger from './logger';
+-+import { closeDbPool } from './database';
+-+import { handleConvertUnitsCommand } from './handlers/convertUnitsCommand';
+-+import { handleSetHormoneTestCommand } from './handlers/setHormoneTestCommand';
+- 
+- const client = new Client({
+-   intents: [
+-@@ -73,6 +76,12 @@ client.on('interactionCreate', async (interaction) => {
+-       case 'deletemylog':
+-         await handleDeleteMyLogCommand(interaction);
+-         break;
+-+      case 'convertunits':
+-+        await handleConvertUnitsCommand(interaction);
+-+        break;
+-+      case 'sethormonetest':
+-+        await handleSetHormoneTestCommand(interaction);
+-+        break;
+-       default:
+-         await interaction.reply({
+-           content: 'Unknown command.',
+-@@ -107,3 +116,19 @@ client.login(config.botToken).catch((error) => {
+-   logger.error('Failed to login to Discord:', { loginError: error });
+-   process.exit(1);
+- });
+-+
+-+const gracefulShutdown = async (signal: string) => {
+-+  logger.info(`Received ${signal}. Shutting down gracefully...`);
+-+  try {
+-+    await closeDbPool();
+-+    await client.destroy();
+-+  } catch (err) {
+-+    logger.error('Error during shutdown:', err);
+-+  } finally {
+-+    process.exit(0);
+-+  }
+-+};
+-+
+-+['SIGINT', 'SIGTERM'].forEach((sig) => {
+-+  process.on(sig, () => void gracefulShutdown(sig));
+-+});
+-diff --git a/src/commands.ts b/src/commands.ts
+-index 84c47fd..75976f4 100644
+---- a/src/commands.ts
+-+++ b/src/commands.ts
+-@@ -1,10 +1,6 @@
+- // src/commands.ts
+- import { REST } from '@discordjs/rest';
+--import {
+--  Routes,
+--  ApplicationCommandOptionType,
+--  PermissionFlagsBits,
+--} from 'discord-api-types/v10'; // Import Permissions
+-+import { Routes, PermissionFlagsBits } from 'discord-api-types/v10'; // Import Permissions
+- import { SlashCommandBuilder } from '@discordjs/builders';
+- import logger from './logger';
+- 
+-@@ -13,7 +9,8 @@ export async function refreshCommands(
+-   guildId: string,
+-   botToken: string,
+- ) {
+--  if (!clientId || !guildId || !botToken) {
+-+  const useGlobal = process.env.NODE_ENV === 'production';
+-+  if (!clientId || !botToken || (!guildId && !useGlobal)) {
+-     logger.error(
+-       'Missing Client ID, Guild ID, or Bot Token for refreshing commands.',
+-     );
+-@@ -24,7 +21,34 @@ export async function refreshCommands(
+-     // --- Existing commands ---
+-     new SlashCommandBuilder()
+-       .setName('injection')
+--      .setDescription('Log your weekly injection after confirmation.')
+-+      .setDescription('Log your injection after confirmation (with optional dose/medication).')
+-+      .addNumberOption((option) =>
+-+        option
+-+          .setName('dose_mg')
+-+          .setDescription('Dose in mg for this injection (e.g., 3.5)')
+-+          .setRequired(false)
+-+          .setMinValue(0.01),
+-+      )
+-+      .addStringOption((option) =>
+-+        option
+-+          .setName('medication')
+-+          .setDescription('Medication name (e.g., estradiol, progesterone)')
+-+          .setRequired(false),
+-+      )
+-+      .addStringOption((option) =>
+-+        option
+-+          .setName('performed_at')
+-+          .setDescription('When the injection was performed (ISO date or YYYY-MM-DD)')
+-+          .setRequired(false),
+-+      )
+-+      .addNumberOption((option) =>
+-+        option
+-+          .setName('raw_units')
+-+          .setDescription('Raw syringe units logged (optional)')
+-+          .setRequired(false)
+-+          .setMinValue(0)
+-+          .setMaxValue(200),
+-+      )
+-       .toJSON(),
+-     new SlashCommandBuilder()
+-       .setName('checklogs')
+-@@ -73,6 +97,30 @@ export async function refreshCommands(
+-           )
+-           .setRequired(false),
+-       )
+-+      .addNumberOption((option) =>
+-+        option
+-+          .setName('interval_days')
+-+          .setDescription(
+-+            'Interval between injections in days (e.g., 3.5, 10, 30). Default: 7',
+-+          )
+-+          .setRequired(false)
+-+          .setMinValue(1)
+-+          .setMaxValue(30),
+-+      )
+-+      .addStringOption((option) =>
+-+        option
+-+          .setName('medication')
+-+          .setDescription('Medication name for reminders (e.g., estradiol)')
+-+          .setRequired(false),
+-+      )
+-+      .addNumberOption((option) =>
+-+        option
+-+          .setName('dose_mg')
+-+          .setDescription('Default dose (mg) to display in reminders')
+-+          .setRequired(false)
+-+          .setMinValue(0.01)
+-+          .setMaxValue(1000),
+-+      )
+-       .toJSON(),
+-     new SlashCommandBuilder()
+-       .setName('stats')
+-@@ -94,6 +142,34 @@ export async function refreshCommands(
+-           .setDescription('The user to log an injection for.')
+-           .setRequired(true),
+-       )
+-+      .addNumberOption((option) =>
+-+        option
+-+          .setName('dose_mg')
+-+          .setDescription('Dose in mg for this injection (e.g., 3.5)')
+-+          .setRequired(false)
+-+          .setMinValue(0.01)
+-+          .setMaxValue(1000),
+-+      )
+-+      .addStringOption((option) =>
+-+        option
+-+          .setName('medication')
+-+          .setDescription('Medication name (e.g., estradiol, progesterone)')
+-+          .setRequired(false),
+-+      )
+-+      .addStringOption((option) =>
+-+        option
+-+          .setName('performed_at')
+-+          .setDescription('When the injection was performed (ISO date or YYYY-MM-DD)')
+-+          .setRequired(false),
+-+      )
+-+      .addNumberOption((option) =>
+-+        option
+-+          .setName('raw_units')
+-+          .setDescription('Raw syringe units logged (optional)')
+-+          .setRequired(false)
+-+          .setMinValue(0)
+-+          .setMaxValue(200),
+-+      )
+-       .toJSON(),
+- 
+-     // --- NEW Deletion Commands ---
+-@@ -139,9 +215,62 @@ export async function refreshCommands(
+-             .setName('log_id')
+-             .setDescription(
+-               'The specific ID of the log entry to delete (optional).',
+--            )
+--            .setRequired(false)
+--            .setMinValue(1), // Log IDs should be positive
+-+          )
+-+          .setRequired(false)
+-+          .setMinValue(1), // Log IDs should be positive
+-+      )
+-+      .toJSON(),
+-+
+-+    new SlashCommandBuilder()
+-+      .setName('convertunits')
+-+      .setDescription(
+-+        'Convert syringe units to milligrams. Assumes 100 units = 1 mL.',
+-+      )
+-+      .addNumberOption((option) =>
+-+        option
+-+          .setName('units')
+-+          .setDescription('Number of units in the syringe (e.g., 30)')
+-+          .setRequired(true)
+-+          .setMinValue(0.01)
+-+          .setMaxValue(200),
+-+      )
+-+      .addNumberOption((option) =>
+-+        option
+-+          .setName('concentration_mg_per_ml')
+-+          .setDescription('Vial concentration in mg/mL (e.g., 200)')
+-+          .setRequired(true)
+-+          .setMinValue(0.01)
+-+          .setMaxValue(2000),
+-+      )
+-+      .toJSON(),
+-+
+-+    new SlashCommandBuilder()
+-+      .setName('sethormonetest')
+-+      .setDescription(
+-+        'Set a hormone test reminder (E/T labs) starting from a date (default: now).',
+-+      )
+-+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+-+      .addStringOption((option) =>
+-+        option
+-+          .setName('start_date')
+-+          .setDescription(
+-+            "Start date for reminders in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:mm). Defaults to 'now'.",
+-+          )
+-+          .setRequired(false),
+-+      )
+-+      .addNumberOption((option) =>
+-+        option
+-+          .setName('interval_days')
+-+          .setDescription('Interval in days between reminders (default 30).')
+-+          .setRequired(false)
+-+          .setMinValue(1)
+-+          .setMaxValue(120),
+-+      )
+-+      .addStringOption((option) =>
+-+        option
+-+          .setName('timezone')
+-+          .setDescription('Timezone for reminders (e.g., UTC, America/New_York)')
+-+          .setRequired(false),
+-       )
+-       .toJSON(),
+-   ];
+-@@ -149,15 +278,21 @@ export async function refreshCommands(
+-   const rest = new REST({ version: '10' }).setToken(botToken);
+- 
+-   try {
+-+    const route = useGlobal
+-+      ? Routes.applicationCommands(clientId)
+-+      : Routes.applicationGuildCommands(clientId, guildId);
+-+
+-     logger.info(
+--      `Started refreshing application (/) commands for guild ${guildId}.`,
+-+      `Started refreshing application (/) commands for ${
+-+        useGlobal ? 'all guilds (global)' : `guild ${guildId}`
+-+      }.`,
+-     );
+--    const updatedCommands = await rest.put(
+--      Routes.applicationGuildCommands(clientId, guildId),
+--      { body: commands },
+-+    const updatedCommands = await rest.put(route, { body: commands });
+-+    logger.info(
+-+      `Successfully refreshed application (/) commands as ${
+-+        useGlobal ? 'global' : 'guild-scoped'
+-+      }.`,
+-     );
+--    logger.info('Successfully refreshed application (/) commands.');
+--    // Ensure updatedCommands is treated as an array before accessing length
+-     const commandCount = Array.isArray(updatedCommands)
+-       ? updatedCommands.length
+-       : 'N/A';
+-diff --git a/src/database.ts b/src/database.ts
+-index 036143d..6bab573 100644
+---- a/src/database.ts
+-+++ b/src/database.ts
+-@@ -3,14 +3,20 @@ import { Pool } from 'pg';
+- import type { QueryResult } from 'pg';
+- import { config } from './config';
+- import logger from './logger';
+-+import { formatTimestampForDisplay } from './time';
+- 
+- // --- Interfaces ---
+- export interface InjectionRecord {
+-   id: number;
+-   user_id: string;
+-   leg: 'Right' | 'Left';
+--  injection_date: string; // Format DD-MM-YYYY
+--  created_at: Date;
+-+  injection_date: string; // TIMESTAMPTZ as ISO string from pg
+-+  performed_at: string;
+-+  medication: string | null;
+-+  dose_mg: number | string | null;
+-+  raw_units: number | null;
+-+  created_by_admin_id: string | null;
+-+  created_at: string;
+- }
+- 
+- export interface GlobalSettings {
+-@@ -18,6 +24,15 @@ export interface GlobalSettings {
+-   injection_day: number;
+-   injection_time: string;
+-   timezone: string;
+-+  interval_days: number;
+-+  start_time: string | null;
+-+  medication: string | null;
+-+  dose_mg: number | null;
+-+  test_start_time: string | null;
+-+  test_interval_days: number | null;
+-+  test_timezone: string | null;
+-+  last_run_at: string | null;
+-+  test_last_run_at: string | null;
+- }
+- 
+- // --- Database Connection Pool ---
+-@@ -47,7 +62,7 @@ export async function getLastRecord(
+-   userId?: string,
+- ): Promise<InjectionRecord | null> {
+-   const baseQuery =
+--    'SELECT id, user_id, leg, injection_date, created_at FROM injections';
+-+    'SELECT id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id, created_at FROM injections';
+-   const params: string[] = [];
+-   let queryText = baseQuery;
+-   if (userId) {
+-@@ -77,8 +92,8 @@ export async function getRecentLogs(
+-   limit: number = 5,
+- ): Promise<InjectionRecord[]> {
+-   const queryText = `
+--        SELECT id, user_id, leg, injection_date, created_at
+--        FROM injections WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`;
+-+        SELECT id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id, created_at
+-+        FROM injections WHERE user_id = $1 ORDER BY performed_at DESC, created_at DESC LIMIT $2`;
+-   try {
+-     const result: QueryResult<InjectionRecord> = await pool.query(queryText, [
+-       userId,
+-@@ -99,8 +114,8 @@ export async function getAllUserRecords(
+-   userId: string,
+- ): Promise<InjectionRecord[]> {
+-   const queryText = `
+--        SELECT id, user_id, leg, injection_date, created_at
+--        FROM injections WHERE user_id = $1 ORDER BY created_at ASC`;
+-+        SELECT id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id, created_at
+-+        FROM injections WHERE user_id = $1 ORDER BY performed_at ASC, created_at ASC`;
+-   try {
+-     const result: QueryResult<InjectionRecord> = await pool.query(queryText, [
+-       userId,
+-@@ -160,7 +175,25 @@ export function getNextLeg(lastLeg?: string | null): 'Right' | 'Left' {
+- 
+- export async function createInjectionRecord(
+-   userId: string,
+--): Promise<{ leg: 'Right' | 'Left'; date: string } | null> {
+-+  options?: {
+-+    medication?: string | null;
+-+    doseMg?: number | null;
+-+    performedAt?: string | Date | null;
+-+    rawUnits?: number | null;
+-+    adminUserId?: string | null;
+-+  },
+-+): Promise<
+-+  | {
+-+      id: number;
+-+      leg: 'Right' | 'Left';
+-+      date: string;
+-+      medication: string | null;
+-+      dose_mg: number | string | null;
+-+      performed_at: string;
+-+      raw_units: number | null;
+-+    }
+-+  | null
+-+> {
+-   try {
+-     const lastRecord = await getLastRecord(userId);
+-     if (lastRecord === null && !userId) {
+-@@ -170,19 +203,58 @@ export async function createInjectionRecord(
+-     }
+- 
+-     const nextLeg = getNextLeg(lastRecord?.leg);
+--    const now = new Date();
+--    const day = now.getDate().toString().padStart(2, '0');
+--    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+--    const year = now.getFullYear();
+--    const injectionDate = `${day}-${month}-${year}`;
+-+    const parsedDose =
+-+      options?.doseMg === null || options?.doseMg === undefined
+-+        ? null
+-+        : Number(options.doseMg);
+-+    const doseValue = Number.isFinite(parsedDose) ? parsedDose : null;
+-+    const rawUnits =
+-+      options?.rawUnits === null || options?.rawUnits === undefined
+-+        ? null
+-+        : Number(options.rawUnits);
+-+    const rawUnitsValue =
+-+      Number.isFinite(rawUnits) && rawUnits >= 0 ? Math.floor(rawUnits) : null;
+-+
+-+    let performedAtValue: Date;
+-+    if (options?.performedAt instanceof Date) {
+-+      performedAtValue = options.performedAt;
+-+    } else if (typeof options?.performedAt === 'string') {
+-+      const parsed = new Date(options.performedAt);
+-+      performedAtValue = isNaN(parsed.getTime()) ? new Date() : parsed;
+-+    } else {
+-+      performedAtValue = new Date();
+-+    }
+-+
+-     const insertQuery = `
+--            INSERT INTO injections (user_id, leg, injection_date)
+--            VALUES ($1, $2, $3) RETURNING leg, injection_date`;
+--    const params = [userId, nextLeg, injectionDate];
+-+            INSERT INTO injections (user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id)
+-+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+-+            RETURNING id, leg, injection_date, performed_at, medication, dose_mg, raw_units`;
+-+    const params = [
+-+      userId,
+-+      nextLeg,
+-+      performedAtValue,
+-+      performedAtValue,
+-+      options?.medication ?? null,
+-+      doseValue,
+-+      rawUnitsValue,
+-+      options?.adminUserId ?? null,
+-+    ];
+-     const result = await pool.query(insertQuery, params);
+-     if (result.rowCount === 1) {
+-       await enforceMaxFiveRecords(userId);
+--      return { leg: result.rows[0].leg, date: result.rows[0].injection_date };
+-+      const formattedDate = formatTimestampForDisplay(
+-+        result.rows[0].performed_at,
+-+        'en-US',
+-+      );
+-+      return {
+-+        id: result.rows[0].id,
+-+        leg: result.rows[0].leg,
+-+        date: formattedDate,
+-+        medication: result.rows[0].medication,
+-+        dose_mg: result.rows[0].dose_mg,
+-+        performed_at: result.rows[0].performed_at,
+-+        raw_units: result.rows[0].raw_units,
+-+      };
+-     } else {
+-       logger.error('PostgreSQL error inserting new record: No rows returned', {
+-         userId,
+-@@ -200,7 +272,7 @@ export async function createInjectionRecord(
+- 
+- export async function getGlobalSettings(): Promise<GlobalSettings | null> {
+-   const queryText =
+--    'SELECT id, injection_day, injection_time, timezone FROM global_settings WHERE id = 1 LIMIT 1';
+-+    'SELECT id, injection_day, injection_time, timezone, interval_days, start_time, medication, dose_mg, test_start_time, test_interval_days, test_timezone, last_run_at, test_last_run_at FROM global_settings WHERE id = 1 LIMIT 1';
+-   try {
+-     const result: QueryResult<GlobalSettings> = await pool.query(queryText);
+-     if (result.rows.length > 0) {
+-@@ -221,16 +293,34 @@ export async function setGlobalSettings(
+-   settings: Omit<GlobalSettings, 'id'>,
+- ): Promise<boolean> {
+-   const queryText = `
+--        INSERT INTO global_settings (id, injection_day, injection_time, timezone)
+--        VALUES (1, $1, $2, $3)
+-+        INSERT INTO global_settings (id, injection_day, injection_time, timezone, interval_days, start_time, medication, dose_mg, test_start_time, test_interval_days, test_timezone, last_run_at, test_last_run_at)
+-+        VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+-         ON CONFLICT (id) DO UPDATE SET
+-             injection_day = EXCLUDED.injection_day,
+-             injection_time = EXCLUDED.injection_time,
+--            timezone = EXCLUDED.timezone`;
+-+            timezone = EXCLUDED.timezone,
+-+            interval_days = EXCLUDED.interval_days,
+-+            start_time = EXCLUDED.start_time,
+-+            medication = EXCLUDED.medication,
+-+            dose_mg = EXCLUDED.dose_mg,
+-+            test_start_time = EXCLUDED.test_start_time,
+-+            test_interval_days = EXCLUDED.test_interval_days,
+-+            test_timezone = EXCLUDED.test_timezone,
+-+            last_run_at = EXCLUDED.last_run_at,
+-+            test_last_run_at = EXCLUDED.test_last_run_at`;
+-   const params = [
+-     settings.injection_day,
+-     settings.injection_time,
+-     settings.timezone,
+-+    settings.interval_days,
+-+    settings.start_time,
+-+    settings.medication,
+-+    settings.dose_mg,
+-+    settings.test_start_time,
+-+    settings.test_interval_days,
+-+    settings.test_timezone,
+-+    settings.last_run_at,
+-+    settings.test_last_run_at,
+-   ];
+-   try {
+-     const result = await pool.query(queryText, params);
+-@@ -351,3 +441,45 @@ export async function closeDbPool() {
+-   await pool.end();
+-   logger.info('PostgreSQL pool closed.');
+- }
+-+
+-+// --- Admin actions audit ---
+-+export async function recordAdminAction(params: {
+-+  adminUserId: string;
+-+  targetUserId?: string;
+-+  action: string;
+-+  logId?: number;
+-+  details?: string;
+-+}) {
+-+  const query = `
+-+    INSERT INTO admin_actions (admin_user_id, target_user_id, action, log_id, details)
+-+    VALUES ($1, $2, $3, $4, $5)`;
+-+  const values = [
+-+    params.adminUserId,
+-+    params.targetUserId ?? null,
+-+    params.action,
+-+    params.logId ?? null,
+-+    params.details ?? null,
+-+  ];
+-+  try {
+-+    await pool.query(query, values);
+-+  } catch (error) {
+-+    logger.error('Failed to record admin action', { params, pgError: error });
+-+  }
+-+}
+-+
+-+export async function updateSchedulerRunTimes(
+-+  lastRunAt?: string,
+-+  testLastRunAt?: string,
+-+) {
+-+  const query = `
+-+    UPDATE global_settings
+-+    SET
+-+      last_run_at = COALESCE($1, last_run_at),
+-+      test_last_run_at = COALESCE($2, test_last_run_at)
+-+    WHERE id = 1`;
+-+  try {
+-+    await pool.query(query, [lastRunAt ?? null, testLastRunAt ?? null]);
+-+  } catch (error) {
+-+    logger.error('Failed to update scheduler run times', { pgError: error });
+-+  }
+-+}
+-diff --git a/src/handlers/adminDeleteLogCommand.ts b/src/handlers/adminDeleteLogCommand.ts
+-index 2494f0f..e782afc 100644
+---- a/src/handlers/adminDeleteLogCommand.ts
+-+++ b/src/handlers/adminDeleteLogCommand.ts
+-@@ -1,8 +1,9 @@
+- // src/handlers/adminDeleteLogCommand.ts
+--import type { CommandInteraction, User } from 'discord.js';
+-+import type { CommandInteraction } from 'discord.js';
+- import { MessageFlags, PermissionFlagsBits } from 'discord.js';
+--import { deleteLogById } from '../database';
+-+import { deleteLogById, recordAdminAction } from '../database';
+- import logger from '../logger';
+-+import { formatTimestampForDisplay } from '../time';
+- 
+- export async function handleAdminDeleteLogCommand(
+-   interaction: CommandInteraction,
+-@@ -53,8 +54,23 @@ export async function handleAdminDeleteLogCommand(
+-     logger.info(
+-       `Admin ${interaction.user.tag} deleted log ID ${logId} (belonging to ${result.deletedRecord.user_id}) for user ${targetUser.tag}.`,
+-     );
+-+    await recordAdminAction({
+-+      adminUserId: interaction.user.id,
+-+      targetUserId: targetUser.id,
+-+      action: 'admindeletelog',
+-+      logId,
+-+      details: `Deleted ${result.deletedRecord.leg} on ${result.deletedRecord.performed_at ?? result.deletedRecord.injection_date}`,
+-+    });
+-+    const medLabel = result.deletedRecord.medication
+-+      ? ` | Medication: ${result.deletedRecord.medication}`
+-+      : '';
+-+    const doseLabel =
+-+      result.deletedRecord.dose_mg !== null &&
+-+      result.deletedRecord.dose_mg !== undefined
+-+        ? ` | Dose: ${result.deletedRecord.dose_mg} mg`
+-+        : '';
+-     await interaction.editReply(
+--      `Successfully deleted log entry #${logId} for user ${targetUser.username}. Details: ${result.deletedRecord.leg} leg on ${result.deletedRecord.injection_date}.`,
+-+      `Successfully deleted log entry #${logId} for user ${targetUser.username}. Details: ${result.deletedRecord.leg} leg on ${formatTimestampForDisplay(result.deletedRecord.performed_at ?? result.deletedRecord.injection_date, interaction.locale ?? 'en-US')}.${medLabel}${doseLabel}`,
+-     );
+-   } else {
+-     logger.warn(
+-diff --git a/src/handlers/checklogsCommand.ts b/src/handlers/checklogsCommand.ts
+-index d238439..d12267a 100644
+---- a/src/handlers/checklogsCommand.ts
+-+++ b/src/handlers/checklogsCommand.ts
+-@@ -5,6 +5,7 @@ import { EmbedBuilder, MessageFlags, PermissionFlagsBits } from 'discord.js';
+- import { getRecentLogs } from '../database'; // <--- VERIFY THIS LINE
+- import type { InjectionRecord } from '../database';
+- import logger from '../logger';
+-+import { formatTimestampForDisplay } from '../time';
+- 
+- // ... rest of the file (should be okay from previous updates) ...
+- export async function handleChecklogsCommand(interaction: CommandInteraction) {
+-@@ -65,11 +66,26 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
+-     )
+-     .setTimestamp();
+- 
+--  const fields = records.map((record) => ({
+--    name: record.injection_date || 'Unknown Date',
+--    value: record.leg === 'Right' ? '✅ Right leg' : '❌ Left leg',
+--    inline: false,
+--  }));
+-+  const fields = records.map((record) => {
+-+    const med = record.medication ? `\nMedication: ${record.medication}` : '';
+-+    const dose =
+-+      record.dose_mg !== null && record.dose_mg !== undefined
+-+        ? `\nDose: ${record.dose_mg} mg`
+-+        : '';
+-+    const units =
+-+      record.raw_units !== null && record.raw_units !== undefined
+-+        ? `\nUnits: ${record.raw_units}`
+-+        : '';
+-+    return {
+-+      name:
+-+        formatTimestampForDisplay(
+-+          record.performed_at ?? record.injection_date,
+-+          interaction.locale ?? 'en-US',
+-+        ) || 'Unknown Date',
+-+      value: `${record.leg === 'Right' ? '✅ Right leg' : '❌ Left leg'}${med}${dose}${units}`,
+-+      inline: false,
+-+    };
+-+  });
+- 
+-   logsEmbed.addFields(fields);
+- 
+-diff --git a/src/handlers/deleteMyLogCommand.ts b/src/handlers/deleteMyLogCommand.ts
+-index 920d045..b5a96de 100644
+---- a/src/handlers/deleteMyLogCommand.ts
+-+++ b/src/handlers/deleteMyLogCommand.ts
+-@@ -2,6 +2,7 @@
+- import type {
+-   CommandInteraction,
+-   MessageComponentInteraction,
+-+  Message,
+- } from 'discord.js';
+- import {
+-   ActionRowBuilder,
+-@@ -13,6 +14,7 @@ import {
+- } from 'discord.js'; // Keep type import
+- import { deleteLogById, deleteLatestLogForUser } from '../database';
+- import logger from '../logger';
+-+import { formatTimestampForDisplay } from '../time';
+- 
+- export async function handleDeleteMyLogCommand(
+-   interaction: CommandInteraction,
+-@@ -82,12 +84,14 @@ export async function handleDeleteMyLogCommand(
+-     components: [actionRow],
+-   });
+- 
+-+  const replyMessage = (await interaction.fetchReply()) as Message;
+-+
+-   const filter = (i: MessageComponentInteraction) =>
+-     (i.customId === confirmCustomId || i.customId === cancelCustomId) &&
+-     i.user.id === interaction.user.id;
+- 
+-   try {
+--    const buttonInteraction = await interaction.channel?.awaitMessageComponent({
+-+    const buttonInteraction = await replyMessage.awaitMessageComponent({
+-       filter,
+-       time: 60000, // 60 seconds timeout
+-     });
+-@@ -114,8 +118,19 @@ export async function handleDeleteMyLogCommand(
+- 
+-       if (result.success && result.deletedRecord) {
+-         const deletedInfo = result.deletedRecord;
+-+        const medLabel = deletedInfo.medication
+-+          ? ` | Medication: ${deletedInfo.medication}`
+-+          : '';
+-+        const doseLabel =
+-+          deletedInfo.dose_mg !== null && deletedInfo.dose_mg !== undefined
+-+            ? ` | Dose: ${deletedInfo.dose_mg} mg`
+-+            : '';
+-+        const unitLabel =
+-+          deletedInfo.raw_units !== null && deletedInfo.raw_units !== undefined
+-+            ? ` | Units: ${deletedInfo.raw_units}`
+-+            : '';
+-         replyOptions = {
+--          content: `Successfully deleted log entry #${deletedInfo.id} (${deletedInfo.leg} leg on ${deletedInfo.injection_date}).`,
+-+          content: `Successfully deleted log entry #${deletedInfo.id} (${deletedInfo.leg} leg on ${formatTimestampForDisplay(deletedInfo.performed_at ?? deletedInfo.injection_date, interaction.locale ?? 'en-US')}${medLabel}${doseLabel}${unitLabel}).`,
+-           embeds: [],
+-           components: [],
+-         };
+-diff --git a/src/handlers/injectionCommand.ts b/src/handlers/injectionCommand.ts
+-index 773a857..4a2a514 100644
+---- a/src/handlers/injectionCommand.ts
+-+++ b/src/handlers/injectionCommand.ts
+-@@ -2,8 +2,8 @@
+- import type {
+-   Client,
+-   CommandInteraction,
+--  TextChannel,
+-   MessageComponentInteraction,
+-+  Message,
+-   InteractionEditReplyOptions,
+- } from 'discord.js';
+- import {
+-@@ -13,7 +13,7 @@ import {
+-   EmbedBuilder,
+-   MessageFlags, // Import MessageFlags
+- } from 'discord.js';
+--import { createInjectionRecord } from '../database';
+-+import { createInjectionRecord, getGlobalSettings } from '../database';
+- import { config } from '../config';
+- import logger from '../logger';
+- 
+-@@ -21,6 +21,14 @@ export async function handleInjectionCommand(
+-   interaction: CommandInteraction,
+-   client: Client,
+- ) {
+-+  if (!config.designatedChannelId) {
+-+    await interaction.reply({
+-+      content:
+-+        'The bot is not configured with a designated channel. Please ask an admin to set DESIGNATED_CHANNEL_ID.',
+-+      flags: MessageFlags.Ephemeral,
+-+    });
+-+    return;
+-+  }
+-   if (interaction.channelId !== config.designatedChannelId) {
+-     await interaction.reply({
+-       content: `This command can only be used in the designated channel (<#${config.designatedChannelId}>).`,
+-@@ -29,6 +37,28 @@ export async function handleInjectionCommand(
+-     return;
+-   }
+- 
+-+  const doseOption = interaction.options.get('dose_mg');
+-+  const medicationOption = interaction.options.get('medication');
+-+  const performedAtOption = interaction.options.get('performed_at');
+-+  const rawUnitsOption = interaction.options.get('raw_units');
+-+
+-+  const doseMg =
+-+    doseOption && typeof doseOption.value === 'number'
+-+      ? doseOption.value
+-+      : null;
+-+  const medication =
+-+    medicationOption && typeof medicationOption.value === 'string'
+-+      ? medicationOption.value
+-+      : null;
+-+  const performedAt =
+-+    performedAtOption && typeof performedAtOption.value === 'string'
+-+      ? performedAtOption.value
+-+      : null;
+-+  const rawUnits =
+-+    rawUnitsOption && typeof rawUnitsOption.value === 'number'
+-+      ? rawUnitsOption.value
+-+      : null;
+-+
+-   // Use flags for deferReply
+-   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+- 
+-@@ -73,12 +103,14 @@ export async function handleInjectionCommand(
+-     components: [actionRow],
+-   });
+- 
+-+  const replyMessage = (await interaction.fetchReply()) as Message;
+-+
+-   const filter = (i: MessageComponentInteraction) =>
+-     (i.customId === confirmCustomId || i.customId === cancelCustomId) &&
+-     i.user.id === interaction.user.id;
+- 
+-   try {
+--    const buttonInteraction = await interaction.channel?.awaitMessageComponent({
+-+    const buttonInteraction = await replyMessage.awaitMessageComponent({
+-       filter,
+-       time: 60000,
+-     });
+-@@ -92,11 +124,29 @@ export async function handleInjectionCommand(
+-     if (buttonInteraction.customId === confirmCustomId) {
+-       await buttonInteraction.deferUpdate();
+-       logger.info(`Injection confirmed by ${interaction.user.tag} via button.`);
+--      const record = await createInjectionRecord(interaction.user.id);
+-+      const defaults = await getGlobalSettings();
+-+      const record = await createInjectionRecord(interaction.user.id, {
+-+        medication: medication ?? defaults?.medication ?? null,
+-+        doseMg: doseMg ?? (defaults?.dose_mg ?? null),
+-+        performedAt,
+-+        rawUnits,
+-+      });
+- 
+-       if (record) {
+-+        const medLabel = record.medication ? `\nMedication: **${record.medication}**` : '';
+-+        const doseLabel =
+-+          record.dose_mg !== null && record.dose_mg !== undefined
+-+            ? `\nDose: **${record.dose_mg} mg**`
+-+            : '';
+-+        const unitLabel =
+-+          record.raw_units !== null && record.raw_units !== undefined
+-+            ? `\nRaw units: **${record.raw_units}**`
+-+            : '';
+-+        const performedLabel = record.performed_at
+-+          ? `\nPerformed at: **${record.performed_at}**`
+-+          : '';
+-         replyOptions = {
+--          content: `Injection recorded successfully: **${record.leg} leg** on **${record.date}**.`,
+-+          content: `Injection recorded successfully: **${record.leg} leg** on **${record.date}**.${medLabel}${doseLabel}${unitLabel}${performedLabel}`,
+-           embeds: [],
+-           components: [],
+-         };
+-diff --git a/src/handlers/logforCommand.ts b/src/handlers/logforCommand.ts
+-index 081c879..b72dea2 100644
+---- a/src/handlers/logforCommand.ts
+-+++ b/src/handlers/logforCommand.ts
+-@@ -1,7 +1,7 @@
+- // src/handlers/logforCommand.ts
+- import type { CommandInteraction } from 'discord.js';
+- import { MessageFlags, PermissionFlagsBits } from 'discord.js';
+--import { createInjectionRecord } from '../database';
+-+import { createInjectionRecord, getGlobalSettings, recordAdminAction } from '../database';
+- import logger from '../logger';
+- 
+- export async function handleLogforCommand(interaction: CommandInteraction) {
+-@@ -45,15 +45,54 @@ export async function handleLogforCommand(interaction: CommandInteraction) {
+- 
+-   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+- 
+-+  const doseOption = interaction.options.get('dose_mg');
+-+  const medicationOption = interaction.options.get('medication');
+-+  const performedAtOption = interaction.options.get('performed_at');
+-+  const rawUnitsOption = interaction.options.get('raw_units');
+-+  const doseMg =
+-+    doseOption && typeof doseOption.value === 'number'
+-+      ? doseOption.value
+-+      : null;
+-+  const medication =
+-+    medicationOption && typeof medicationOption.value === 'string'
+-+      ? medicationOption.value
+-+      : null;
+-+  const performedAt =
+-+    performedAtOption && typeof performedAtOption.value === 'string'
+-+      ? performedAtOption.value
+-+      : null;
+-+  const rawUnits =
+-+    rawUnitsOption && typeof rawUnitsOption.value === 'number'
+-+      ? rawUnitsOption.value
+-+      : null;
+-+
+-   try {
+--    const record = await createInjectionRecord(targetUser.id);
+-+    const defaults = await getGlobalSettings();
+-+    const record = await createInjectionRecord(targetUser.id, {
+-+      medication: medication ?? defaults?.medication ?? null,
+-+      doseMg: doseMg ?? (defaults?.dose_mg ?? null),
+-+      performedAt,
+-+      rawUnits,
+-+      adminUserId: interaction.user.id,
+-+    });
+- 
+-     if (record) {
+-       logger.info(
+-         `Admin ${interaction.user.tag} logged injection for ${targetUser.tag}: ${record.leg} leg on ${record.date}.`,
+-       );
+-+      await recordAdminAction({
+-+        adminUserId: interaction.user.id,
+-+        targetUserId: targetUser.id,
+-+        action: 'logfor',
+-+        logId: record.id,
+-+        details: `Dose ${record.dose_mg ?? 'n/a'} mg, units ${record.raw_units ?? 'n/a'}, performed_at ${record.performed_at ?? 'n/a'}`,
+-+      });
+-       await interaction.editReply(
+--        `Injection recorded for ${targetUser.username}: **${record.leg} leg** on **${record.date}**.`,
+-+        `Injection recorded for ${targetUser.username}: **${record.leg} leg** on **${record.date}**${record.medication ? ` | Medication: ${record.medication}` : ''}${
+-+          record.dose_mg !== null && record.dose_mg !== undefined
+-+            ? ` | Dose: ${record.dose_mg} mg`
+-+            : ''
+-+        }.`,
+-       );
+-     } else {
+-       logger.error(
+-diff --git a/src/handlers/nextInjectionCommand.ts b/src/handlers/nextInjectionCommand.ts
+-index 19a4d57..8104f0f 100644
+---- a/src/handlers/nextInjectionCommand.ts
+-+++ b/src/handlers/nextInjectionCommand.ts
+-@@ -7,11 +7,11 @@ import { DateTime } from 'luxon';
+- import {
+-   describeTimeUntil,
+-   formatDateTimeForDisplay,
+-+  formatTimestampForDisplay,
+-   getNextInjectionDateTime,
+-   isValidTimeZone,
+-   getAnchorDateTime,
+- } from '../time';
+--import { DateTime } from 'luxon';
+- 
+- export async function handleNextInjectionCommand(
+-   interaction: CommandInteraction,
+-@@ -39,7 +39,10 @@ export async function handleNextInjectionCommand(
+-         timezone,
+-       );
+-       if (anchor) {
+--        settings.start_time = anchor.toISO();
+-+        const iso = anchor.toISO();
+-+        if (iso) {
+-+          settings.start_time = iso;
+-+        }
+-       }
+-     }
+-     const now = DateTime.now().setZone(timezone);
+-@@ -69,7 +72,7 @@ export async function handleNextInjectionCommand(
+-         ? `${settings.dose_mg} mg`
+-         : 'Unspecified';
+-     const anchorLabel = settings.start_time
+--      ? formatDateTimeForDisplay(
+-+      ? formatTimestampForDisplay(
+-           settings.start_time,
+-           interaction.locale ?? 'en-US',
+-           timezone,
+-diff --git a/src/handlers/setInjectionScheduleCommand.ts b/src/handlers/setInjectionScheduleCommand.ts
+-index 2b30650..3e8f560 100644
+---- a/src/handlers/setInjectionScheduleCommand.ts
+-+++ b/src/handlers/setInjectionScheduleCommand.ts
+-@@ -2,8 +2,10 @@
+- import type { CommandInteraction } from 'discord.js'; // Import type
+- import { MessageFlags, PermissionFlagsBits } from 'discord.js'; // Import MessageFlags
+- import type { GlobalSettings } from '../database';
+--import { setGlobalSettings } from '../database';
+-+import { setGlobalSettings, getGlobalSettings } from '../database';
+- import logger from '../logger';
+-+import { isValidTimeZone } from '../time';
+-+import { getAnchorDateTime } from '../time';
+- 
+- const dayNameToNumber: { [key: string]: number } = {
+-   /* ... as before ... */ sunday: 0,
+-@@ -44,6 +46,9 @@ export async function handleSetInjectionScheduleCommand(
+-   const dayOption = interaction.options.get('day', true);
+-   const timeOption = interaction.options.get('time', true);
+-   const timezoneOption = interaction.options.get('timezone');
+-+  const intervalOption = interaction.options.get('interval_days');
+-+  const medicationOption = interaction.options.get('medication');
+-+  const doseOption = interaction.options.get('dose_mg');
+- 
+-   if (
+-     typeof dayOption.value !== 'string' ||
+-@@ -62,6 +67,15 @@ export async function handleSetInjectionScheduleCommand(
+-   const timezone =
+-     typeof timezoneOption?.value === 'string' ? timezoneOption.value : 'UTC';
+- 
+-+  if (!isValidTimeZone(timezone)) {
+-+    await interaction.reply({
+-+      content:
+-+        'Invalid timezone provided. Please use a valid IANA timezone (e.g., UTC, America/New_York).',
+-+      flags: MessageFlags.Ephemeral,
+-+    });
+-+    return;
+-+  }
+-+
+-   const injection_day = dayNameToNumber[dayName];
+-   if (injection_day === undefined) {
+-     // Use flags for reply
+-@@ -82,25 +96,69 @@ export async function handleSetInjectionScheduleCommand(
+-     return;
+-   }
+- 
+-+  const interval_days =
+-+    intervalOption && typeof intervalOption.value === 'number'
+-+      ? intervalOption.value
+-+      : 7;
+-+  if (interval_days <= 0 || interval_days > 30) {
+-+    await interaction.reply({
+-+      content: 'Interval must be between 1 and 30 days.',
+-+      flags: MessageFlags.Ephemeral,
+-+    });
+-+    return;
+-+  }
+-+
+-+  const medication =
+-+    medicationOption && typeof medicationOption.value === 'string'
+-+      ? medicationOption.value
+-+      : null;
+-+  const dose_mg =
+-+    doseOption && typeof doseOption.value === 'number'
+-+      ? doseOption.value
+-+      : null;
+-+
+-+  const anchor = getAnchorDateTime(injection_day, time, timezone);
+-+  if (!anchor) {
+-+    await interaction.reply({
+-+      content:
+-+        'Could not compute the first reminder time. Please double-check the day, time, and timezone.',
+-+      flags: MessageFlags.Ephemeral,
+-+    });
+-+    return;
+-+  }
+-+
+-   // Use flags for deferReply
+-   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+- 
+-+  const existing = await getGlobalSettings();
+-+
+-   const newSettings: Omit<GlobalSettings, 'id'> = {
+-     injection_day,
+-     injection_time: time,
+-     timezone,
+-+    interval_days,
+-+    start_time: anchor.toISO(),
+-+    medication,
+-+    dose_mg,
+-+    test_start_time: existing?.test_start_time ?? null,
+-+    test_interval_days: existing?.test_interval_days ?? null,
+-+    test_timezone: existing?.test_timezone ?? timezone,
+-+    last_run_at: existing?.last_run_at ?? null,
+-+    test_last_run_at: existing?.test_last_run_at ?? null,
+-   };
+- 
+-   const success = await setGlobalSettings(newSettings);
+- 
+-   if (success) {
+-     logger.info(
+--      `Injection schedule updated by ${interaction.user.tag} to ${dayName} at ${time} (${timezone}).`,
+-+      `Injection schedule updated by ${interaction.user.tag} to ${dayName} at ${time} (${timezone}), every ${interval_days} day(s).`,
+-     );
+-     try {
+-       await triggerReschedule();
+-       await interaction.editReply(
+--        `Injection schedule updated to ${dayOption.value} at ${time} (${timezone}). The scheduler has been updated.`,
+-+        `Injection schedule updated to ${dayOption.value} at ${time} (${timezone}), every ${interval_days} day(s). The scheduler has been updated.${medication ? ` Medication: ${medication}.` : ''}${
+-+          dose_mg ? ` Default dose: ${dose_mg} mg.` : ''
+-+        }`,
+-       );
+-       logger.info('Scheduler successfully updated following schedule change.');
+-     } catch (rescheduleError) {
+-diff --git a/src/handlers/statsCommand.ts b/src/handlers/statsCommand.ts
+-index efe9f53..f609a88 100644
+---- a/src/handlers/statsCommand.ts
+-+++ b/src/handlers/statsCommand.ts
+-@@ -67,22 +67,25 @@ export async function handleStatsCommand(interaction: CommandInteraction) {
+-     // Iterate backwards from the second-to-last record
+-     for (let i = records.length - 1; i > 0; i--) {
+-       try {
+--        // Ensure created_at exists and is a valid date string/object
+--        if (!records[i]?.created_at || !records[i - 1]?.created_at) {
+-+        const currentDateSrc = records[i]?.performed_at || records[i]?.injection_date;
+-+        const prevDateSrc =
+-+          records[i - 1]?.performed_at || records[i - 1]?.injection_date;
+-+
+-+        if (!currentDateSrc || !prevDateSrc) {
+-           logger.warn(
+--            `Missing created_at date during streak calculation for user ${userIdToCheck}:`,
+-+            `Missing performed_at date during streak calculation for user ${userIdToCheck}:`,
+-             { record_i: records[i], record_i_1: records[i - 1] },
+-           );
+-           break; // Skip calculation if dates are missing
+-         }
+- 
+--        const current = new Date(records[i].created_at);
+--        const prev = new Date(records[i - 1].created_at);
+-+        const current = new Date(currentDateSrc);
+-+        const prev = new Date(prevDateSrc);
+- 
+-         if (isNaN(current.getTime()) || isNaN(prev.getTime())) {
+-           logger.warn(
+-             `Invalid date encountered during streak calculation for user ${userIdToCheck}:`,
+--            { current: records[i].created_at, prev: records[i - 1].created_at },
+-+            { current: currentDateSrc, prev: prevDateSrc },
+-           );
+-           break;
+-         }
+-diff --git a/src/scheduler.ts b/src/scheduler.ts
+-index 34c54c3..13c3b48 100644
+---- a/src/scheduler.ts
+-+++ b/src/scheduler.ts
+-@@ -1,84 +1,82 @@
+- // src/scheduler.ts
+--import type {
+--  Client,
+--  TextChannel,
+--  MessageComponentInteraction,
+--} from 'discord.js';
+--import {
+--  ActionRowBuilder,
+--  ButtonBuilder,
+--  ButtonStyle,
+--  EmbedBuilder,
+--} from 'discord.js';
+--import * as cron from 'node-cron';
+--import type { ScheduledTask } from 'node-cron';
+-+import type { Client, TextChannel } from 'discord.js';
+-+import { EmbedBuilder } from 'discord.js';
+- import type { GlobalSettings } from './database';
+--import { getGlobalSettings } from './database'; // Ensure this is correctly imported
+-+import { getGlobalSettings, updateSchedulerRunTimes } from './database'; // Ensure this is correctly imported
+- import logger from './logger';
+- import { config } from './config';
+-+import {
+-+  getNextInjectionDateTime,
+-+  isValidTimeZone,
+-+  getAnchorDateTime,
+-+  getNextFromAnchor,
+-+} from './time';
+-+import { DateTime } from 'luxon';
+-+
+-+const MAX_TIMEOUT = 2 ** 31 - 1;
+- 
+--let promptTask: ScheduledTask | null = null;
+--let reminderTask: ScheduledTask | null = null;
+-+let promptTimeout: NodeJS.Timeout | null = null;
+-+let reminderTimeout: NodeJS.Timeout | null = null;
+-+let testReminderTimeout: NodeJS.Timeout | null = null;
+- let currentClient: Client | null = null;
+-+let currentSettings: GlobalSettings | null = null;
+- 
+--// Helper: compute next injection Date based on global settings.
+--function computeNextInjectionDate(settings: GlobalSettings): Date | null {
+--  try {
+--    if (
+--      !settings ||
+--      typeof settings.injection_day !== 'number' ||
+--      !settings.injection_time
+--    ) {
+--      logger.error(
+--        'Invalid settings provided to computeNextInjectionDate:',
+--        settings,
+-+// Renamed internal function slightly to avoid potential conflict with export name if any
+-+function clearScheduled() {
+-+  if (promptTimeout) {
+-+    clearTimeout(promptTimeout);
+-+    promptTimeout = null;
+-+    logger.info('Cleared existing prompt timeout.');
+-+  }
+-+  if (reminderTimeout) {
+-+    clearTimeout(reminderTimeout);
+-+    reminderTimeout = null;
+-+    logger.info('Cleared existing reminder timeout.');
+-+  }
+-+  if (testReminderTimeout) {
+-+    clearTimeout(testReminderTimeout);
+-+    testReminderTimeout = null;
+-+    logger.info('Cleared existing hormone test reminder timeout.');
+-+  }
+-+}
+-+
+-+function scheduleTimeout(
+-+  target: DateTime,
+-+  callback: () => Promise<void>,
+-+  label: string,
+-+): NodeJS.Timeout {
+-+  let timeout: NodeJS.Timeout;
+-+  const scheduleChunk = () => {
+-+    const now = DateTime.now().setZone(target.zoneName ?? undefined);
+-+    const delayMs = target.diff(now, 'milliseconds').milliseconds;
+-+    if (delayMs <= 0) {
+-+      logger.warn(
+-+        `${label} time is in the past; executing immediately. target=${target.toISO()}`,
+-       );
+--      return null;
+-+      void callback();
+-+      return;
+-     }
+--    const now = new Date();
+--    const [hourStr, minuteStr] = settings.injection_time.split(':');
+--    const hour = parseInt(hourStr, 10);
+--    const minute = parseInt(minuteStr, 10);
+--    if (
+--      isNaN(hour) ||
+--      isNaN(minute) ||
+--      hour < 0 ||
+--      hour > 23 ||
+--      minute < 0 ||
+--      minute > 59
+--    ) {
+--      logger.error(
+--        `Invalid time format in settings: ${settings.injection_time}`,
+-+    if (delayMs > MAX_TIMEOUT) {
+-+      logger.info(
+-+        `${label} is more than ${Math.round(
+-+          MAX_TIMEOUT / (1000 * 60 * 60 * 24),
+-+        )} days away; scheduling intermediate wake-up.`,
+-       );
+--      return null;
+-+      timeout = setTimeout(scheduleChunk, MAX_TIMEOUT);
+-+    } else {
+-+      timeout = setTimeout(() => {
+-+        void callback();
+-+      }, delayMs);
+-     }
+--    let nextInjection = new Date();
+--    nextInjection.setHours(hour, minute, 0, 0);
+--    const currentDay = now.getDay();
+--    let daysUntil = (settings.injection_day - currentDay + 7) % 7;
+--    if (daysUntil === 0 && now.getTime() >= nextInjection.getTime()) {
+--      daysUntil = 7;
+--    }
+--    nextInjection.setDate(now.getDate() + daysUntil);
+--    return nextInjection;
+--  } catch (error) {
+--    logger.error('Error computing next injection date:', error);
+--    return null;
+--  }
+--} // Closing brace for computeNextInjectionDate
+-+  };
+-+  scheduleChunk();
+-+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+-+  return timeout!;
+-+}
+- 
+--// Renamed internal function slightly to avoid potential conflict with export name if any
+- async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
+--  if (promptTask) {
+--    promptTask.stop();
+--    promptTask = null;
+--    logger.info('Stopped existing prompt task.');
+--  }
+--  if (reminderTask) {
+--    reminderTask.stop();
+--    reminderTask = null;
+--    logger.info('Stopped existing reminder task.');
+--  }
+-+  clearScheduled();
+-+  currentSettings = settings;
+- 
+-   const channelId = config.designatedChannelId;
+-   if (!channelId) {
+-@@ -88,7 +86,30 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
+-     return;
+-   }
+- 
+--  const nextInjectionDate = computeNextInjectionDate(settings);
+-+  if (!settings.start_time) {
+-+    const anchor = getAnchorDateTime(
+-+      settings.injection_day,
+-+      settings.injection_time,
+-+      settings.timezone,
+-+    );
+-+    if (anchor) {
+-+      const iso = anchor.toISO();
+-+      if (iso) {
+-+        settings.start_time = iso;
+-+        logger.warn('start_time missing in settings; using computed anchor.');
+-+      } else {
+-+        logger.error('Failed to derive ISO string for start_time.');
+-+        return;
+-+      }
+-+    } else {
+-+      logger.error(
+-+        'start_time missing and could not compute anchor. Aborting scheduling.',
+-+      );
+-+      return;
+-+    }
+-+  }
+-+
+-+  const nextInjectionDate = getNextInjectionDateTime(settings);
+-   if (!nextInjectionDate) {
+-     logger.error(
+-       'Could not compute next injection date from settings. Aborting schedule.',
+-@@ -96,117 +117,268 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
+-     return;
+-   }
+- 
+--  const [hour, minute] = settings.injection_time.split(':');
+--  const cronTimezone = settings.timezone || 'UTC';
+--
+--  const promptCron = `${minute} ${hour} * * ${settings.injection_day}`;
+--  logger.info(
+--    `Scheduling prompt job with cron: "${promptCron}" in timezone "${cronTimezone}"`,
+--  );
+--
+--  promptTask = cron.schedule(
+--    promptCron,
+--    async () => {
+--      // Opening brace for async callback (matches related info start point)
+--      logger.info(
+--        `Injection prompt job triggered for ${settings.injection_day} at ${settings.injection_time} ${cronTimezone}.`,
+--      );
+--      try {
+--        // Opening brace for try block
+--        const channel = (await client.channels.fetch(channelId).catch((err) => {
+--          logger.error(`Failed to fetch channel ${channelId} for prompt:`, err);
+--          return null;
+--        })) as TextChannel | null;
+--
+--        if (!channel) {
+--          logger.error(
+--            `Designated channel ${channelId} not found or accessible for injection prompt.`,
+--          );
+--          return; // Exit if channel not found
+--        }
+-+  const timezone =
+-+    settings.timezone && isValidTimeZone(settings.timezone)
+-+      ? settings.timezone
+-+      : 'UTC';
+- 
+--        const promptEmbed = new EmbedBuilder()
+--          .setTitle('Injection Reminder')
+-+  // Catch-up: if we missed the last scheduled prompt, send a catch-up notice
+-+  const intervalDaysNum = Number(settings.interval_days) || 7;
+-+  const lastRun = settings.last_run_at
+-+    ? DateTime.fromISO(settings.last_run_at, { zone: timezone })
+-+    : null;
+-+  const previousInjection = nextInjectionDate.minus({ days: intervalDaysNum });
+-+  if (!lastRun || (previousInjection.isValid && lastRun < previousInjection)) {
+-+    try {
+-+      const channel = (await client.channels.fetch(channelId).catch((err) => {
+-+        logger.error(
+-+          `Failed to fetch channel ${channelId} for catch-up prompt:`,
+-+          err,
+-+        );
+-+        return null;
+-+      })) as TextChannel | null;
+-+      if (channel) {
+-+        const medLabel =
+-+          settings.medication || settings.medication === ''
+-+            ? settings.medication
+-+            : 'Injection';
+-+        const doseLabel =
+-+          settings.dose_mg !== null && settings.dose_mg !== undefined
+-+            ? `Dose: **${settings.dose_mg} mg**`
+-+            : '';
+-+        const catchupEmbed = new EmbedBuilder()
+-+          .setTitle(`${medLabel} Reminder (Catch-up)`)
+-           .setDescription(
+--            "It's injection time! Please log your injection using the `/injection` command.",
+--          )
+--          .setColor(0x1abc9c)
+--          .setThumbnail(
+--            'https://cdn1.iconfinder.com/data/icons/medical-1-3/128/3-512.png',
+-+            `A scheduled reminder may have been missed while the bot was offline. Please ensure your last injection is logged.${doseLabel ? `\n${doseLabel}` : ''}`,
+-           )
+-+          .setColor(0xe67e22)
+-           .setTimestamp();
+-+        await channel.send({ embeds: [catchupEmbed] });
+-+        logger.info('Sent catch-up injection reminder.');
+-+      }
+-+      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
+-+    } catch (err) {
+-+      logger.error('Failed to send catch-up reminder', err);
+-+    }
+-+  }
+-+
+-+  const scheduleNext = async () => {
+-+    await internalScheduleJobs(client, currentSettings as GlobalSettings);
+-+  };
+-+
+-+  const sendPrompt = async () => {
+-+    logger.info(
+-+      `Injection prompt triggered for ${nextInjectionDate.toISO()} (${timezone}).`,
+-+    );
+-+    try {
+-+      const channel = (await client.channels.fetch(channelId).catch((err) => {
+-+        logger.error(`Failed to fetch channel ${channelId} for prompt:`, err);
+-+        return null;
+-+      })) as TextChannel | null;
+-+
+-+      if (!channel) {
+-+        logger.error(
+-+          `Designated channel ${channelId} not found or accessible for injection prompt.`,
+-+        );
+-+        return; // Exit if channel not found
+-+      }
+-+
+-+      const medLabel =
+-+        settings.medication || settings.medication === ''
+-+          ? settings.medication
+-+          : 'Injection';
+-+      const doseLabel =
+-+        settings.dose_mg !== null && settings.dose_mg !== undefined
+-+          ? `Dose: **${settings.dose_mg} mg**`
+-+          : '';
+-+
+-+      const promptEmbed = new EmbedBuilder()
+-+        .setTitle(`${medLabel} Reminder`)
+-+        .setDescription(
+-+          `It's injection time! Please log your injection using the \`/injection\` command.${doseLabel ? `\n${doseLabel}` : ''}`,
+-+        )
+-+        .setColor(0x1abc9c)
+-+        .setThumbnail(
+-+          'https://cdn1.iconfinder.com/data/icons/medical-1-3/128/3-512.png',
+-+        )
+-+        .setTimestamp();
+-+
+-+      await channel.send({ embeds: [promptEmbed] }); // Line 87 area
+-+      logger.info(`Sent injection prompt to channel ${channelId}.`); // Added for clarity
+-+      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
+-+    } catch (error) {
+-+      // Closing brace for try, opening for catch
+-+      logger.error('Error in injection prompt job execution:', error);
+-+    } // Closing brace for catch
+-+    // After prompt, schedule next cycle
+-+    await scheduleNext();
+-+  };
+-+
+-+  const sendReminder = async () => {
+-+    logger.info(`Injection reminder triggered for 1 hour before schedule.`);
+-+    try {
+-+      const channel = (await client.channels.fetch(channelId).catch((err) => {
+-+        logger.error(`Failed to fetch channel ${channelId} for reminder:`, err);
+-+        return null;
+-+      })) as TextChannel | null;
+-+
+-+      if (!channel) {
+-+        logger.error(
+-+          `Designated channel ${channelId} not found or accessible for injection reminder.`,
+-+        );
+-+        return;
+-+      }
+-+
+-+      const medLabel =
+-+        settings.medication || settings.medication === ''
+-+          ? settings.medication
+-+          : 'Injection';
+-+      const doseLabel =
+-+        settings.dose_mg !== null && settings.dose_mg !== undefined
+-+          ? `Dose: **${settings.dose_mg} mg**`
+-+          : '';
+-+
+-+      const reminderEmbed = new EmbedBuilder()
+-+        .setTitle(`${medLabel} Reminder - 1 Hour Left`)
+-+        .setDescription(
+-+          `Reminder: Your injection is scheduled in approximately 1 hour. Get ready!${doseLabel ? `\n${doseLabel}` : ''}`,
+-+        )
+-+        .setColor(0xf1c40f)
+-+        .setThumbnail(
+-+          'https://cdn-icons-png.flaticon.com/512/3075/3075977.png',
+-+        )
+-+        .setTimestamp();
+-+
+-+      await channel.send({ embeds: [reminderEmbed] });
+-+      logger.info(`Sent injection reminder to channel ${channelId}.`);
+-+      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
+-+    } catch (error) {
+-+      logger.error('Error in injection reminder job execution:', error);
+-+    }
+-+  };
+- 
+--        await channel.send({ embeds: [promptEmbed] }); // Line 87 area
+--        logger.info(`Sent injection prompt to channel ${channelId}.`); // Added for clarity
+--      } catch (error) {
+--        // Closing brace for try, opening for catch
+--        logger.error('Error in injection prompt job execution:', error);
+--      } // Closing brace for catch
+--    },
+--    {
+--      // Closing brace for async callback, opening for options object
+--      scheduled: true,
+--      timezone: cronTimezone,
+--    },
+--  ); // Closing brace and parenthesis for cron.schedule call
+--  logger.info(`Prompt task scheduled successfully.`);
+--
+--  // --- Schedule Reminder Job (1 hour before) ---
+--  let reminderTime = new Date(nextInjectionDate.getTime());
+--  reminderTime.setHours(reminderTime.getHours() - 1);
+--  const reminderMinute = reminderTime.getMinutes();
+--  const reminderHour = reminderTime.getHours();
+--  const reminderDayOfWeek = reminderTime.getDay();
+--  const reminderCron = `${reminderMinute} ${reminderHour} * * ${reminderDayOfWeek}`;
+-   logger.info(
+--    `Scheduling reminder job with cron: "${reminderCron}" in timezone "${cronTimezone}"`,
+-+    `Scheduling prompt at ${nextInjectionDate.toISO()} (${timezone}) with interval ${settings.interval_days} day(s).`,
+-   );
+- 
+--  reminderTask = cron.schedule(
+--    reminderCron,
+--    async () => {
+--      logger.info(
+--        `Injection reminder job triggered for 1 hour before schedule.`,
+-+  promptTimeout = scheduleTimeout(nextInjectionDate, sendPrompt, 'prompt');
+-+
+-+  const reminderDateTime = nextInjectionDate.minus({ hours: 1 });
+-+  if (reminderDateTime > DateTime.now().setZone(timezone)) {
+-+    reminderTimeout = scheduleTimeout(
+-+      reminderDateTime,
+-+      sendReminder,
+-+      'reminder',
+-+    );
+-+    logger.info(
+-+      `Scheduling reminder at ${reminderDateTime.toISO()} (${timezone}).`,
+-+    );
+-+  } else {
+-+    logger.warn('Reminder time is already past; skipping for this cycle.');
+-+  }
+-+
+-+  // --- Hormone test reminder (E/T labs) ---
+-+  const sendTestReminder = async () => {
+-+    try {
+-+      const channel = (await client.channels.fetch(channelId).catch((err) => {
+-+        logger.error(
+-+          `Failed to fetch channel ${channelId} for hormone test reminder:`,
+-+          err,
+-+        );
+-+        return null;
+-+      })) as TextChannel | null;
+-+
+-+      if (!channel) {
+-+        logger.error(
+-+          `Designated channel ${channelId} not found or accessible for hormone test reminder.`,
+-+        );
+-+        return;
+-+      }
+-+
+-+      const tz = settings.test_timezone ?? timezone;
+-+      const startLabel = settings.test_start_time ?? 'not set';
+-+      const intervalLabel = settings.test_interval_days ?? 30;
+-+
+-+      const testEmbed = new EmbedBuilder()
+-+        .setTitle('Hormone Test Reminder')
+-+        .setDescription(
+-+          `Time to schedule or perform your E/T labs (through day check).\nStart: ${startLabel}\nInterval: every ${intervalLabel} day(s)\nTimezone: ${tz}`,
+-+        )
+-+        .setColor(0x8e44ad)
+-+        .setTimestamp();
+-+
+-+      await channel.send({ embeds: [testEmbed] });
+-+      logger.info(`Sent hormone test reminder to channel ${channelId}.`);
+-+      await updateSchedulerRunTimes(undefined, new Date().toISOString());
+-+    } catch (error) {
+-+      logger.error('Error in hormone test reminder execution:', error);
+-+    }
+-+    scheduleTestReminder();
+-+  };
+-+
+-+  const scheduleTestReminder = () => {
+-+    if (
+-+      settings.test_start_time &&
+-+      settings.test_interval_days &&
+-+      settings.test_interval_days > 0
+-+    ) {
+-+      const nextTest = getNextFromAnchor(
+-+        settings.test_start_time,
+-+        Number(settings.test_interval_days),
+-+        settings.test_timezone ?? timezone,
+-       );
+--      try {
+--        const channel = (await client.channels.fetch(channelId).catch((err) => {
+--          logger.error(
+--            `Failed to fetch channel ${channelId} for reminder:`,
+--            err,
+--          );
+--          return null;
+--        })) as TextChannel | null;
+--
+--        if (!channel) {
+--          logger.error(
+--            `Designated channel ${channelId} not found or accessible for injection reminder.`,
+--          );
+--          return;
+-+      if (nextTest) {
+-+        const lastTestRun = settings.test_last_run_at
+-+          ? DateTime.fromISO(settings.test_last_run_at, {
+-+              zone: settings.test_timezone ?? timezone,
+-+            })
+-+          : null;
+-+        const prevTest = nextTest.minus({
+-+          days: Number(settings.test_interval_days),
+-+        });
+-+        if (!lastTestRun || (prevTest.isValid && lastTestRun < prevTest)) {
+-+          // Fire a catch-up test reminder
+-+          void (async () => {
+-+            try {
+-+              const channel = (await client.channels.fetch(channelId).catch(
+-+                (err) => {
+-+                  logger.error(
+-+                    `Failed to fetch channel ${channelId} for test catch-up:`,
+-+                    err,
+-+                  );
+-+                  return null;
+-+                },
+-+              )) as TextChannel | null;
+-+              if (channel) {
+-+                const testEmbed = new EmbedBuilder()
+-+                  .setTitle('Hormone Test Reminder (Catch-up)')
+-+                  .setDescription(
+-+                    `A scheduled hormone test reminder may have been missed while the bot was offline. Please verify your upcoming labs.`,
+-+                  )
+-+                  .setColor(0x8e44ad)
+-+                  .setTimestamp();
+-+                await channel.send({ embeds: [testEmbed] });
+-+                await updateSchedulerRunTimes(undefined, new Date().toISOString());
+-+              }
+-+            } catch (err) {
+-+              logger.error('Failed to send test catch-up reminder', err);
+-+            }
+-+          })();
+-         }
+- 
+--        const reminderEmbed = new EmbedBuilder()
+--          .setTitle('Injection Reminder - 1 Hour Left')
+--          .setDescription(
+--            'Reminder: Your injection is scheduled in approximately 1 hour. Get ready!',
+--          )
+--          .setColor(0xf1c40f)
+--          .setThumbnail(
+--            'https://cdn-icons-png.flaticon.com/512/3075/3075977.png',
+--          )
+--          .setTimestamp();
+--
+--        await channel.send({ embeds: [reminderEmbed] });
+--        logger.info(`Sent injection reminder to channel ${channelId}.`);
+--      } catch (error) {
+--        logger.error('Error in injection reminder job execution:', error);
+-+        testReminderTimeout = scheduleTimeout(
+-+          nextTest,
+-+          sendTestReminder,
+-+          'hormone-test',
+-+        );
+-+        logger.info(
+-+          `Scheduled hormone test reminder at ${nextTest.toISO()} (${settings.test_timezone ?? timezone}) every ${settings.test_interval_days} day(s).`,
+-+        );
+-       }
+--    },
+--    {
+--      scheduled: true,
+--      timezone: cronTimezone,
+--    },
+--  );
+--  logger.info(`Reminder task scheduled successfully.`);
+-+    }
+-+  };
+-+
+-+  scheduleTestReminder();
+- } // Closing brace for internalScheduleJobs
+- 
+- // EXPORTED function called initially and when settings change
+-@@ -220,8 +392,14 @@ export async function initializeScheduler(client: Client) {
+-     );
+-     return;
+-   }
+-+  if (!isValidTimeZone(settings.timezone)) {
+-+    logger.warn(
+-+      `Configured timezone "${settings.timezone}" is invalid. Falling back to UTC for scheduling.`,
+-+    );
+-+    settings.timezone = 'UTC';
+-+  }
+-   logger.info(
+--    `Workspaceed initial settings: Day ${settings.injection_day}, Time ${settings.injection_time}, TZ ${settings.timezone}`,
+-+    `Loaded initial settings: Day ${settings.injection_day}, Time ${settings.injection_time}, TZ ${settings.timezone}, Interval ${settings.interval_days} day(s)`,
+-   );
+-   await internalScheduleJobs(client, settings); // Call internal function
+- } // Closing brace for initializeScheduler
+-@@ -240,8 +418,14 @@ export async function rescheduleJobs() {
+-     );
+-     return;
+-   }
+-+  if (!isValidTimeZone(settings.timezone)) {
+-+    logger.warn(
+-+      `Configured timezone "${settings.timezone}" is invalid. Falling back to UTC for scheduling.`,
+-+    );
+-+    settings.timezone = 'UTC';
+-+  }
+-   logger.info(
+--    `Workspaceed updated settings: Day ${settings.injection_day}, Time ${settings.injection_time}, TZ ${settings.timezone}`,
+-+    `Loaded updated settings: Day ${settings.injection_day}, Time ${settings.injection_time}, TZ ${settings.timezone}, Interval ${settings.interval_days} day(s)`,
+-   );
+-   await internalScheduleJobs(currentClient, settings); // Call internal function
+-   logger.info('Jobs rescheduled successfully.');
 diff --git a/src/bot.ts b/src/bot.ts
-index 1db7d5f..9ea0fc1 100644
+index 9ea0fc1..fbad564 100644
 --- a/src/bot.ts
 +++ b/src/bot.ts
-@@ -13,6 +13,9 @@ import { handleAdminDeleteLogCommand } from './handlers/adminDeleteLogCommand';
- import { handleDeleteMyLogCommand } from './handlers/deleteMyLogCommand';
- import { initializeScheduler, rescheduleJobs } from './scheduler';
- import logger from './logger';
-+import { closeDbPool } from './database';
-+import { handleConvertUnitsCommand } from './handlers/convertUnitsCommand';
-+import { handleSetHormoneTestCommand } from './handlers/setHormoneTestCommand';
+@@ -16,6 +16,8 @@ import logger from './logger';
+ import { closeDbPool } from './database';
+ import { handleConvertUnitsCommand } from './handlers/convertUnitsCommand';
+ import { handleSetHormoneTestCommand } from './handlers/setHormoneTestCommand';
++import { handleHelpCommand } from './handlers/helpCommand';
++import { handleSetupCheckCommand } from './handlers/setupCheckCommand';
  
  const client = new Client({
    intents: [
-@@ -73,6 +76,12 @@ client.on('interactionCreate', async (interaction) => {
-       case 'deletemylog':
-         await handleDeleteMyLogCommand(interaction);
+@@ -82,6 +84,12 @@ client.on('interactionCreate', async (interaction) => {
+       case 'sethormonetest':
+         await handleSetHormoneTestCommand(interaction);
          break;
-+      case 'convertunits':
-+        await handleConvertUnitsCommand(interaction);
++      case 'help':
++        await handleHelpCommand(interaction);
 +        break;
-+      case 'sethormonetest':
-+        await handleSetHormoneTestCommand(interaction);
++      case 'setupcheck':
++        await handleSetupCheckCommand(interaction);
 +        break;
        default:
          await interaction.reply({
            content: 'Unknown command.',
-@@ -107,3 +116,19 @@ client.login(config.botToken).catch((error) => {
-   logger.error('Failed to login to Discord:', { loginError: error });
-   process.exit(1);
- });
-+
-+const gracefulShutdown = async (signal: string) => {
-+  logger.info(`Received ${signal}. Shutting down gracefully...`);
-+  try {
-+    await closeDbPool();
-+    await client.destroy();
-+  } catch (err) {
-+    logger.error('Error during shutdown:', err);
-+  } finally {
-+    process.exit(0);
-+  }
-+};
-+
-+['SIGINT', 'SIGTERM'].forEach((sig) => {
-+  process.on(sig, () => void gracefulShutdown(sig));
-+});
 diff --git a/src/commands.ts b/src/commands.ts
-index 84c47fd..75976f4 100644
+index 75976f4..df96632 100644
 --- a/src/commands.ts
 +++ b/src/commands.ts
-@@ -1,10 +1,6 @@
- // src/commands.ts
- import { REST } from '@discordjs/rest';
--import {
--  Routes,
--  ApplicationCommandOptionType,
--  PermissionFlagsBits,
--} from 'discord-api-types/v10'; // Import Permissions
-+import { Routes, PermissionFlagsBits } from 'discord-api-types/v10'; // Import Permissions
- import { SlashCommandBuilder } from '@discordjs/builders';
- import logger from './logger';
- 
-@@ -13,7 +9,8 @@ export async function refreshCommands(
-   guildId: string,
-   botToken: string,
- ) {
--  if (!clientId || !guildId || !botToken) {
-+  const useGlobal = process.env.NODE_ENV === 'production';
-+  if (!clientId || !botToken || (!guildId && !useGlobal)) {
-     logger.error(
-       'Missing Client ID, Guild ID, or Bot Token for refreshing commands.',
-     );
-@@ -24,7 +21,34 @@ export async function refreshCommands(
-     // --- Existing commands ---
-     new SlashCommandBuilder()
-       .setName('injection')
--      .setDescription('Log your weekly injection after confirmation.')
-+      .setDescription('Log your injection after confirmation (with optional dose/medication).')
-+      .addNumberOption((option) =>
-+        option
-+          .setName('dose_mg')
-+          .setDescription('Dose in mg for this injection (e.g., 3.5)')
-+          .setRequired(false)
-+          .setMinValue(0.01),
-+      )
-+      .addStringOption((option) =>
-+        option
-+          .setName('medication')
-+          .setDescription('Medication name (e.g., estradiol, progesterone)')
-+          .setRequired(false),
-+      )
-+      .addStringOption((option) =>
-+        option
-+          .setName('performed_at')
-+          .setDescription('When the injection was performed (ISO date or YYYY-MM-DD)')
-+          .setRequired(false),
-+      )
-+      .addNumberOption((option) =>
-+        option
-+          .setName('raw_units')
-+          .setDescription('Raw syringe units logged (optional)')
-+          .setRequired(false)
-+          .setMinValue(0)
-+          .setMaxValue(200),
-+      )
-       .toJSON(),
-     new SlashCommandBuilder()
-       .setName('checklogs')
-@@ -73,6 +97,30 @@ export async function refreshCommands(
-           )
+@@ -273,6 +273,15 @@ export async function refreshCommands(
            .setRequired(false),
        )
-+      .addNumberOption((option) =>
-+        option
-+          .setName('interval_days')
-+          .setDescription(
-+            'Interval between injections in days (e.g., 3.5, 10, 30). Default: 7',
-+          )
-+          .setRequired(false)
-+          .setMinValue(1)
-+          .setMaxValue(30),
-+      )
-+      .addStringOption((option) =>
-+        option
-+          .setName('medication')
-+          .setDescription('Medication name for reminders (e.g., estradiol)')
-+          .setRequired(false),
-+      )
-+      .addNumberOption((option) =>
-+        option
-+          .setName('dose_mg')
-+          .setDescription('Default dose (mg) to display in reminders')
-+          .setRequired(false)
-+          .setMinValue(0.01)
-+          .setMaxValue(1000),
-+      )
        .toJSON(),
-     new SlashCommandBuilder()
-       .setName('stats')
-@@ -94,6 +142,34 @@ export async function refreshCommands(
-           .setDescription('The user to log an injection for.')
-           .setRequired(true),
-       )
-+      .addNumberOption((option) =>
-+        option
-+          .setName('dose_mg')
-+          .setDescription('Dose in mg for this injection (e.g., 3.5)')
-+          .setRequired(false)
-+          .setMinValue(0.01)
-+          .setMaxValue(1000),
-+      )
-+      .addStringOption((option) =>
-+        option
-+          .setName('medication')
-+          .setDescription('Medication name (e.g., estradiol, progesterone)')
-+          .setRequired(false),
-+      )
-+      .addStringOption((option) =>
-+        option
-+          .setName('performed_at')
-+          .setDescription('When the injection was performed (ISO date or YYYY-MM-DD)')
-+          .setRequired(false),
-+      )
-+      .addNumberOption((option) =>
-+        option
-+          .setName('raw_units')
-+          .setDescription('Raw syringe units logged (optional)')
-+          .setRequired(false)
-+          .setMinValue(0)
-+          .setMaxValue(200),
-+      )
-       .toJSON(),
- 
-     // --- NEW Deletion Commands ---
-@@ -139,9 +215,62 @@ export async function refreshCommands(
-             .setName('log_id')
-             .setDescription(
-               'The specific ID of the log entry to delete (optional).',
--            )
--            .setRequired(false)
--            .setMinValue(1), // Log IDs should be positive
-+          )
-+          .setRequired(false)
-+          .setMinValue(1), // Log IDs should be positive
-+      )
-+      .toJSON(),
-+
 +    new SlashCommandBuilder()
-+      .setName('convertunits')
-+      .setDescription(
-+        'Convert syringe units to milligrams. Assumes 100 units = 1 mL.',
-+      )
-+      .addNumberOption((option) =>
-+        option
-+          .setName('units')
-+          .setDescription('Number of units in the syringe (e.g., 30)')
-+          .setRequired(true)
-+          .setMinValue(0.01)
-+          .setMaxValue(200),
-+      )
-+      .addNumberOption((option) =>
-+        option
-+          .setName('concentration_mg_per_ml')
-+          .setDescription('Vial concentration in mg/mL (e.g., 200)')
-+          .setRequired(true)
-+          .setMinValue(0.01)
-+          .setMaxValue(2000),
-+      )
-+      .toJSON(),
-+
-+    new SlashCommandBuilder()
-+      .setName('sethormonetest')
-+      .setDescription(
-+        'Set a hormone test reminder (E/T labs) starting from a date (default: now).',
-+      )
++      .setName('setupcheck')
++      .setDescription('Admin: quick checklist to verify config and database.')
 +      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-+      .addStringOption((option) =>
-+        option
-+          .setName('start_date')
-+          .setDescription(
-+            "Start date for reminders in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:mm). Defaults to 'now'.",
-+          )
-+          .setRequired(false),
-+      )
-+      .addNumberOption((option) =>
-+        option
-+          .setName('interval_days')
-+          .setDescription('Interval in days between reminders (default 30).')
-+          .setRequired(false)
-+          .setMinValue(1)
-+          .setMaxValue(120),
-+      )
-+      .addStringOption((option) =>
-+        option
-+          .setName('timezone')
-+          .setDescription('Timezone for reminders (e.g., UTC, America/New_York)')
-+          .setRequired(false),
-       )
-       .toJSON(),
++      .toJSON(),
++    new SlashCommandBuilder()
++      .setName('help')
++      .setDescription('Get a simple, friendly walkthrough for using Injekta.')
++      .toJSON(),
    ];
-@@ -149,15 +278,21 @@ export async function refreshCommands(
-   const rest = new REST({ version: '10' }).setToken(botToken);
  
-   try {
-+    const route = useGlobal
-+      ? Routes.applicationCommands(clientId)
-+      : Routes.applicationGuildCommands(clientId, guildId);
-+
-     logger.info(
--      `Started refreshing application (/) commands for guild ${guildId}.`,
-+      `Started refreshing application (/) commands for ${
-+        useGlobal ? 'all guilds (global)' : `guild ${guildId}`
-+      }.`,
-     );
--    const updatedCommands = await rest.put(
--      Routes.applicationGuildCommands(clientId, guildId),
--      { body: commands },
-+    const updatedCommands = await rest.put(route, { body: commands });
-+    logger.info(
-+      `Successfully refreshed application (/) commands as ${
-+        useGlobal ? 'global' : 'guild-scoped'
-+      }.`,
-     );
--    logger.info('Successfully refreshed application (/) commands.');
--    // Ensure updatedCommands is treated as an array before accessing length
-     const commandCount = Array.isArray(updatedCommands)
-       ? updatedCommands.length
-       : 'N/A';
+   const rest = new REST({ version: '10' }).setToken(botToken);
 diff --git a/src/database.ts b/src/database.ts
-index 036143d..6bab573 100644
+index 6bab573..e314306 100644
 --- a/src/database.ts
 +++ b/src/database.ts
-@@ -3,14 +3,20 @@ import { Pool } from 'pg';
- import type { QueryResult } from 'pg';
- import { config } from './config';
- import logger from './logger';
-+import { formatTimestampForDisplay } from './time';
+@@ -213,7 +213,9 @@ export async function createInjectionRecord(
+         ? null
+         : Number(options.rawUnits);
+     const rawUnitsValue =
+-      Number.isFinite(rawUnits) && rawUnits >= 0 ? Math.floor(rawUnits) : null;
++      rawUnits !== null && Number.isFinite(rawUnits) && rawUnits >= 0
++        ? Math.floor(rawUnits)
++        : null;
  
- // --- Interfaces ---
- export interface InjectionRecord {
-   id: number;
-   user_id: string;
-   leg: 'Right' | 'Left';
--  injection_date: string; // Format DD-MM-YYYY
--  created_at: Date;
-+  injection_date: string; // TIMESTAMPTZ as ISO string from pg
-+  performed_at: string;
-+  medication: string | null;
-+  dose_mg: number | string | null;
-+  raw_units: number | null;
-+  created_by_admin_id: string | null;
-+  created_at: string;
- }
- 
- export interface GlobalSettings {
-@@ -18,6 +24,15 @@ export interface GlobalSettings {
-   injection_day: number;
-   injection_time: string;
-   timezone: string;
-+  interval_days: number;
-+  start_time: string | null;
-+  medication: string | null;
-+  dose_mg: number | null;
-+  test_start_time: string | null;
-+  test_interval_days: number | null;
-+  test_timezone: string | null;
-+  last_run_at: string | null;
-+  test_last_run_at: string | null;
- }
- 
- // --- Database Connection Pool ---
-@@ -47,7 +62,7 @@ export async function getLastRecord(
-   userId?: string,
- ): Promise<InjectionRecord | null> {
-   const baseQuery =
--    'SELECT id, user_id, leg, injection_date, created_at FROM injections';
-+    'SELECT id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id, created_at FROM injections';
-   const params: string[] = [];
-   let queryText = baseQuery;
-   if (userId) {
-@@ -77,8 +92,8 @@ export async function getRecentLogs(
-   limit: number = 5,
- ): Promise<InjectionRecord[]> {
-   const queryText = `
--        SELECT id, user_id, leg, injection_date, created_at
--        FROM injections WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`;
-+        SELECT id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id, created_at
-+        FROM injections WHERE user_id = $1 ORDER BY performed_at DESC, created_at DESC LIMIT $2`;
-   try {
-     const result: QueryResult<InjectionRecord> = await pool.query(queryText, [
-       userId,
-@@ -99,8 +114,8 @@ export async function getAllUserRecords(
-   userId: string,
- ): Promise<InjectionRecord[]> {
-   const queryText = `
--        SELECT id, user_id, leg, injection_date, created_at
--        FROM injections WHERE user_id = $1 ORDER BY created_at ASC`;
-+        SELECT id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id, created_at
-+        FROM injections WHERE user_id = $1 ORDER BY performed_at ASC, created_at ASC`;
-   try {
-     const result: QueryResult<InjectionRecord> = await pool.query(queryText, [
-       userId,
-@@ -160,7 +175,25 @@ export function getNextLeg(lastLeg?: string | null): 'Right' | 'Left' {
- 
- export async function createInjectionRecord(
-   userId: string,
--): Promise<{ leg: 'Right' | 'Left'; date: string } | null> {
-+  options?: {
-+    medication?: string | null;
-+    doseMg?: number | null;
-+    performedAt?: string | Date | null;
-+    rawUnits?: number | null;
-+    adminUserId?: string | null;
-+  },
-+): Promise<
-+  | {
-+      id: number;
-+      leg: 'Right' | 'Left';
-+      date: string;
-+      medication: string | null;
-+      dose_mg: number | string | null;
-+      performed_at: string;
-+      raw_units: number | null;
-+    }
-+  | null
-+> {
-   try {
-     const lastRecord = await getLastRecord(userId);
-     if (lastRecord === null && !userId) {
-@@ -170,19 +203,58 @@ export async function createInjectionRecord(
-     }
- 
-     const nextLeg = getNextLeg(lastRecord?.leg);
--    const now = new Date();
--    const day = now.getDate().toString().padStart(2, '0');
--    const month = (now.getMonth() + 1).toString().padStart(2, '0');
--    const year = now.getFullYear();
--    const injectionDate = `${day}-${month}-${year}`;
-+    const parsedDose =
-+      options?.doseMg === null || options?.doseMg === undefined
-+        ? null
-+        : Number(options.doseMg);
-+    const doseValue = Number.isFinite(parsedDose) ? parsedDose : null;
-+    const rawUnits =
-+      options?.rawUnits === null || options?.rawUnits === undefined
-+        ? null
-+        : Number(options.rawUnits);
-+    const rawUnitsValue =
-+      Number.isFinite(rawUnits) && rawUnits >= 0 ? Math.floor(rawUnits) : null;
-+
-+    let performedAtValue: Date;
-+    if (options?.performedAt instanceof Date) {
-+      performedAtValue = options.performedAt;
-+    } else if (typeof options?.performedAt === 'string') {
-+      const parsed = new Date(options.performedAt);
-+      performedAtValue = isNaN(parsed.getTime()) ? new Date() : parsed;
-+    } else {
-+      performedAtValue = new Date();
-+    }
-+
-     const insertQuery = `
--            INSERT INTO injections (user_id, leg, injection_date)
--            VALUES ($1, $2, $3) RETURNING leg, injection_date`;
--    const params = [userId, nextLeg, injectionDate];
-+            INSERT INTO injections (user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id)
-+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-+            RETURNING id, leg, injection_date, performed_at, medication, dose_mg, raw_units`;
-+    const params = [
-+      userId,
-+      nextLeg,
-+      performedAtValue,
-+      performedAtValue,
-+      options?.medication ?? null,
-+      doseValue,
-+      rawUnitsValue,
-+      options?.adminUserId ?? null,
-+    ];
-     const result = await pool.query(insertQuery, params);
-     if (result.rowCount === 1) {
-       await enforceMaxFiveRecords(userId);
--      return { leg: result.rows[0].leg, date: result.rows[0].injection_date };
-+      const formattedDate = formatTimestampForDisplay(
-+        result.rows[0].performed_at,
-+        'en-US',
-+      );
-+      return {
-+        id: result.rows[0].id,
-+        leg: result.rows[0].leg,
-+        date: formattedDate,
-+        medication: result.rows[0].medication,
-+        dose_mg: result.rows[0].dose_mg,
-+        performed_at: result.rows[0].performed_at,
-+        raw_units: result.rows[0].raw_units,
-+      };
-     } else {
-       logger.error('PostgreSQL error inserting new record: No rows returned', {
-         userId,
-@@ -200,7 +272,7 @@ export async function createInjectionRecord(
- 
- export async function getGlobalSettings(): Promise<GlobalSettings | null> {
-   const queryText =
--    'SELECT id, injection_day, injection_time, timezone FROM global_settings WHERE id = 1 LIMIT 1';
-+    'SELECT id, injection_day, injection_time, timezone, interval_days, start_time, medication, dose_mg, test_start_time, test_interval_days, test_timezone, last_run_at, test_last_run_at FROM global_settings WHERE id = 1 LIMIT 1';
-   try {
-     const result: QueryResult<GlobalSettings> = await pool.query(queryText);
-     if (result.rows.length > 0) {
-@@ -221,16 +293,34 @@ export async function setGlobalSettings(
-   settings: Omit<GlobalSettings, 'id'>,
- ): Promise<boolean> {
-   const queryText = `
--        INSERT INTO global_settings (id, injection_day, injection_time, timezone)
--        VALUES (1, $1, $2, $3)
-+        INSERT INTO global_settings (id, injection_day, injection_time, timezone, interval_days, start_time, medication, dose_mg, test_start_time, test_interval_days, test_timezone, last_run_at, test_last_run_at)
-+        VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-         ON CONFLICT (id) DO UPDATE SET
-             injection_day = EXCLUDED.injection_day,
-             injection_time = EXCLUDED.injection_time,
--            timezone = EXCLUDED.timezone`;
-+            timezone = EXCLUDED.timezone,
-+            interval_days = EXCLUDED.interval_days,
-+            start_time = EXCLUDED.start_time,
-+            medication = EXCLUDED.medication,
-+            dose_mg = EXCLUDED.dose_mg,
-+            test_start_time = EXCLUDED.test_start_time,
-+            test_interval_days = EXCLUDED.test_interval_days,
-+            test_timezone = EXCLUDED.test_timezone,
-+            last_run_at = EXCLUDED.last_run_at,
-+            test_last_run_at = EXCLUDED.test_last_run_at`;
-   const params = [
-     settings.injection_day,
-     settings.injection_time,
-     settings.timezone,
-+    settings.interval_days,
-+    settings.start_time,
-+    settings.medication,
-+    settings.dose_mg,
-+    settings.test_start_time,
-+    settings.test_interval_days,
-+    settings.test_timezone,
-+    settings.last_run_at,
-+    settings.test_last_run_at,
-   ];
-   try {
-     const result = await pool.query(queryText, params);
-@@ -351,3 +441,45 @@ export async function closeDbPool() {
-   await pool.end();
-   logger.info('PostgreSQL pool closed.');
+     let performedAtValue: Date;
+     if (options?.performedAt instanceof Date) {
+@@ -483,3 +485,14 @@ export async function updateSchedulerRunTimes(
+     logger.error('Failed to update scheduler run times', { pgError: error });
+   }
  }
 +
-+// --- Admin actions audit ---
-+export async function recordAdminAction(params: {
-+  adminUserId: string;
-+  targetUserId?: string;
-+  action: string;
-+  logId?: number;
-+  details?: string;
-+}) {
-+  const query = `
-+    INSERT INTO admin_actions (admin_user_id, target_user_id, action, log_id, details)
-+    VALUES ($1, $2, $3, $4, $5)`;
-+  const values = [
-+    params.adminUserId,
-+    params.targetUserId ?? null,
-+    params.action,
-+    params.logId ?? null,
-+    params.details ?? null,
-+  ];
++// --- Health checks ---
++export async function pingDatabase(): Promise<boolean> {
 +  try {
-+    await pool.query(query, values);
++    await pool.query('SELECT 1');
++    return true;
 +  } catch (error) {
-+    logger.error('Failed to record admin action', { params, pgError: error });
++    logger.error('Database ping failed', { pgError: error });
++    return false;
 +  }
 +}
-+
-+export async function updateSchedulerRunTimes(
-+  lastRunAt?: string,
-+  testLastRunAt?: string,
-+) {
-+  const query = `
-+    UPDATE global_settings
-+    SET
-+      last_run_at = COALESCE($1, last_run_at),
-+      test_last_run_at = COALESCE($2, test_last_run_at)
-+    WHERE id = 1`;
-+  try {
-+    await pool.query(query, [lastRunAt ?? null, testLastRunAt ?? null]);
-+  } catch (error) {
-+    logger.error('Failed to update scheduler run times', { pgError: error });
-+  }
-+}
-diff --git a/src/handlers/adminDeleteLogCommand.ts b/src/handlers/adminDeleteLogCommand.ts
-index 2494f0f..e782afc 100644
---- a/src/handlers/adminDeleteLogCommand.ts
-+++ b/src/handlers/adminDeleteLogCommand.ts
-@@ -1,8 +1,9 @@
- // src/handlers/adminDeleteLogCommand.ts
--import type { CommandInteraction, User } from 'discord.js';
-+import type { CommandInteraction } from 'discord.js';
- import { MessageFlags, PermissionFlagsBits } from 'discord.js';
--import { deleteLogById } from '../database';
-+import { deleteLogById, recordAdminAction } from '../database';
- import logger from '../logger';
-+import { formatTimestampForDisplay } from '../time';
- 
- export async function handleAdminDeleteLogCommand(
-   interaction: CommandInteraction,
-@@ -53,8 +54,23 @@ export async function handleAdminDeleteLogCommand(
-     logger.info(
-       `Admin ${interaction.user.tag} deleted log ID ${logId} (belonging to ${result.deletedRecord.user_id}) for user ${targetUser.tag}.`,
-     );
-+    await recordAdminAction({
-+      adminUserId: interaction.user.id,
-+      targetUserId: targetUser.id,
-+      action: 'admindeletelog',
-+      logId,
-+      details: `Deleted ${result.deletedRecord.leg} on ${result.deletedRecord.performed_at ?? result.deletedRecord.injection_date}`,
-+    });
-+    const medLabel = result.deletedRecord.medication
-+      ? ` | Medication: ${result.deletedRecord.medication}`
-+      : '';
-+    const doseLabel =
-+      result.deletedRecord.dose_mg !== null &&
-+      result.deletedRecord.dose_mg !== undefined
-+        ? ` | Dose: ${result.deletedRecord.dose_mg} mg`
-+        : '';
-     await interaction.editReply(
--      `Successfully deleted log entry #${logId} for user ${targetUser.username}. Details: ${result.deletedRecord.leg} leg on ${result.deletedRecord.injection_date}.`,
-+      `Successfully deleted log entry #${logId} for user ${targetUser.username}. Details: ${result.deletedRecord.leg} leg on ${formatTimestampForDisplay(result.deletedRecord.performed_at ?? result.deletedRecord.injection_date, interaction.locale ?? 'en-US')}.${medLabel}${doseLabel}`,
-     );
-   } else {
-     logger.warn(
 diff --git a/src/handlers/checklogsCommand.ts b/src/handlers/checklogsCommand.ts
-index d238439..d12267a 100644
+index d12267a..c92ba7a 100644
 --- a/src/handlers/checklogsCommand.ts
 +++ b/src/handlers/checklogsCommand.ts
-@@ -5,6 +5,7 @@ import { EmbedBuilder, MessageFlags, PermissionFlagsBits } from 'discord.js';
- import { getRecentLogs } from '../database'; // <--- VERIFY THIS LINE
- import type { InjectionRecord } from '../database';
- import logger from '../logger';
-+import { formatTimestampForDisplay } from '../time';
- 
- // ... rest of the file (should be okay from previous updates) ...
- export async function handleChecklogsCommand(interaction: CommandInteraction) {
-@@ -65,11 +66,26 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
-     )
-     .setTimestamp();
- 
--  const fields = records.map((record) => ({
--    name: record.injection_date || 'Unknown Date',
--    value: record.leg === 'Right' ? '✅ Right leg' : '❌ Left leg',
--    inline: false,
--  }));
-+  const fields = records.map((record) => {
-+    const med = record.medication ? `\nMedication: ${record.medication}` : '';
-+    const dose =
-+      record.dose_mg !== null && record.dose_mg !== undefined
-+        ? `\nDose: ${record.dose_mg} mg`
-+        : '';
-+    const units =
-+      record.raw_units !== null && record.raw_units !== undefined
-+        ? `\nUnits: ${record.raw_units}`
-+        : '';
-+    return {
-+      name:
-+        formatTimestampForDisplay(
-+          record.performed_at ?? record.injection_date,
-+          interaction.locale ?? 'en-US',
-+        ) || 'Unknown Date',
-+      value: `${record.leg === 'Right' ? '✅ Right leg' : '❌ Left leg'}${med}${dose}${units}`,
-+      inline: false,
-+    };
-+  });
- 
-   logsEmbed.addFields(fields);
- 
-diff --git a/src/handlers/deleteMyLogCommand.ts b/src/handlers/deleteMyLogCommand.ts
-index 920d045..b5a96de 100644
---- a/src/handlers/deleteMyLogCommand.ts
-+++ b/src/handlers/deleteMyLogCommand.ts
-@@ -2,6 +2,7 @@
- import type {
-   CommandInteraction,
-   MessageComponentInteraction,
-+  Message,
- } from 'discord.js';
- import {
-   ActionRowBuilder,
-@@ -13,6 +14,7 @@ import {
- } from 'discord.js'; // Keep type import
- import { deleteLogById, deleteLatestLogForUser } from '../database';
- import logger from '../logger';
-+import { formatTimestampForDisplay } from '../time';
- 
- export async function handleDeleteMyLogCommand(
-   interaction: CommandInteraction,
-@@ -82,12 +84,14 @@ export async function handleDeleteMyLogCommand(
-     components: [actionRow],
-   });
- 
-+  const replyMessage = (await interaction.fetchReply()) as Message;
-+
-   const filter = (i: MessageComponentInteraction) =>
-     (i.customId === confirmCustomId || i.customId === cancelCustomId) &&
-     i.user.id === interaction.user.id;
- 
-   try {
--    const buttonInteraction = await interaction.channel?.awaitMessageComponent({
-+    const buttonInteraction = await replyMessage.awaitMessageComponent({
-       filter,
-       time: 60000, // 60 seconds timeout
-     });
-@@ -114,8 +118,19 @@ export async function handleDeleteMyLogCommand(
- 
-       if (result.success && result.deletedRecord) {
-         const deletedInfo = result.deletedRecord;
-+        const medLabel = deletedInfo.medication
-+          ? ` | Medication: ${deletedInfo.medication}`
-+          : '';
-+        const doseLabel =
-+          deletedInfo.dose_mg !== null && deletedInfo.dose_mg !== undefined
-+            ? ` | Dose: ${deletedInfo.dose_mg} mg`
-+            : '';
-+        const unitLabel =
-+          deletedInfo.raw_units !== null && deletedInfo.raw_units !== undefined
-+            ? ` | Units: ${deletedInfo.raw_units}`
-+            : '';
-         replyOptions = {
--          content: `Successfully deleted log entry #${deletedInfo.id} (${deletedInfo.leg} leg on ${deletedInfo.injection_date}).`,
-+          content: `Successfully deleted log entry #${deletedInfo.id} (${deletedInfo.leg} leg on ${formatTimestampForDisplay(deletedInfo.performed_at ?? deletedInfo.injection_date, interaction.locale ?? 'en-US')}${medLabel}${doseLabel}${unitLabel}).`,
-           embeds: [],
-           components: [],
-         };
-diff --git a/src/handlers/injectionCommand.ts b/src/handlers/injectionCommand.ts
-index 773a857..4a2a514 100644
---- a/src/handlers/injectionCommand.ts
-+++ b/src/handlers/injectionCommand.ts
-@@ -2,8 +2,8 @@
- import type {
-   Client,
-   CommandInteraction,
--  TextChannel,
-   MessageComponentInteraction,
-+  Message,
-   InteractionEditReplyOptions,
- } from 'discord.js';
- import {
-@@ -13,7 +13,7 @@ import {
-   EmbedBuilder,
-   MessageFlags, // Import MessageFlags
- } from 'discord.js';
--import { createInjectionRecord } from '../database';
-+import { createInjectionRecord, getGlobalSettings } from '../database';
- import { config } from '../config';
- import logger from '../logger';
- 
-@@ -21,6 +21,14 @@ export async function handleInjectionCommand(
-   interaction: CommandInteraction,
-   client: Client,
- ) {
-+  if (!config.designatedChannelId) {
-+    await interaction.reply({
-+      content:
-+        'The bot is not configured with a designated channel. Please ask an admin to set DESIGNATED_CHANNEL_ID.',
-+      flags: MessageFlags.Ephemeral,
-+    });
-+    return;
-+  }
-   if (interaction.channelId !== config.designatedChannelId) {
-     await interaction.reply({
-       content: `This command can only be used in the designated channel (<#${config.designatedChannelId}>).`,
-@@ -29,6 +37,28 @@ export async function handleInjectionCommand(
-     return;
-   }
- 
-+  const doseOption = interaction.options.get('dose_mg');
-+  const medicationOption = interaction.options.get('medication');
-+  const performedAtOption = interaction.options.get('performed_at');
-+  const rawUnitsOption = interaction.options.get('raw_units');
-+
-+  const doseMg =
-+    doseOption && typeof doseOption.value === 'number'
-+      ? doseOption.value
-+      : null;
-+  const medication =
-+    medicationOption && typeof medicationOption.value === 'string'
-+      ? medicationOption.value
-+      : null;
-+  const performedAt =
-+    performedAtOption && typeof performedAtOption.value === 'string'
-+      ? performedAtOption.value
-+      : null;
-+  const rawUnits =
-+    rawUnitsOption && typeof rawUnitsOption.value === 'number'
-+      ? rawUnitsOption.value
-+      : null;
-+
-   // Use flags for deferReply
-   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
- 
-@@ -73,12 +103,14 @@ export async function handleInjectionCommand(
-     components: [actionRow],
-   });
- 
-+  const replyMessage = (await interaction.fetchReply()) as Message;
-+
-   const filter = (i: MessageComponentInteraction) =>
-     (i.customId === confirmCustomId || i.customId === cancelCustomId) &&
-     i.user.id === interaction.user.id;
- 
-   try {
--    const buttonInteraction = await interaction.channel?.awaitMessageComponent({
-+    const buttonInteraction = await replyMessage.awaitMessageComponent({
-       filter,
-       time: 60000,
-     });
-@@ -92,11 +124,29 @@ export async function handleInjectionCommand(
-     if (buttonInteraction.customId === confirmCustomId) {
-       await buttonInteraction.deferUpdate();
-       logger.info(`Injection confirmed by ${interaction.user.tag} via button.`);
--      const record = await createInjectionRecord(interaction.user.id);
-+      const defaults = await getGlobalSettings();
-+      const record = await createInjectionRecord(interaction.user.id, {
-+        medication: medication ?? defaults?.medication ?? null,
-+        doseMg: doseMg ?? (defaults?.dose_mg ?? null),
-+        performedAt,
-+        rawUnits,
-+      });
- 
-       if (record) {
-+        const medLabel = record.medication ? `\nMedication: **${record.medication}**` : '';
-+        const doseLabel =
-+          record.dose_mg !== null && record.dose_mg !== undefined
-+            ? `\nDose: **${record.dose_mg} mg**`
-+            : '';
-+        const unitLabel =
-+          record.raw_units !== null && record.raw_units !== undefined
-+            ? `\nRaw units: **${record.raw_units}**`
-+            : '';
-+        const performedLabel = record.performed_at
-+          ? `\nPerformed at: **${record.performed_at}**`
-+          : '';
-         replyOptions = {
--          content: `Injection recorded successfully: **${record.leg} leg** on **${record.date}**.`,
-+          content: `Injection recorded successfully: **${record.leg} leg** on **${record.date}**.${medLabel}${doseLabel}${unitLabel}${performedLabel}`,
-           embeds: [],
-           components: [],
-         };
-diff --git a/src/handlers/logforCommand.ts b/src/handlers/logforCommand.ts
-index 081c879..b72dea2 100644
---- a/src/handlers/logforCommand.ts
-+++ b/src/handlers/logforCommand.ts
-@@ -1,7 +1,7 @@
- // src/handlers/logforCommand.ts
- import type { CommandInteraction } from 'discord.js';
- import { MessageFlags, PermissionFlagsBits } from 'discord.js';
--import { createInjectionRecord } from '../database';
-+import { createInjectionRecord, getGlobalSettings, recordAdminAction } from '../database';
- import logger from '../logger';
- 
- export async function handleLogforCommand(interaction: CommandInteraction) {
-@@ -45,15 +45,54 @@ export async function handleLogforCommand(interaction: CommandInteraction) {
- 
-   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
- 
-+  const doseOption = interaction.options.get('dose_mg');
-+  const medicationOption = interaction.options.get('medication');
-+  const performedAtOption = interaction.options.get('performed_at');
-+  const rawUnitsOption = interaction.options.get('raw_units');
-+  const doseMg =
-+    doseOption && typeof doseOption.value === 'number'
-+      ? doseOption.value
-+      : null;
-+  const medication =
-+    medicationOption && typeof medicationOption.value === 'string'
-+      ? medicationOption.value
-+      : null;
-+  const performedAt =
-+    performedAtOption && typeof performedAtOption.value === 'string'
-+      ? performedAtOption.value
-+      : null;
-+  const rawUnits =
-+    rawUnitsOption && typeof rawUnitsOption.value === 'number'
-+      ? rawUnitsOption.value
-+      : null;
-+
-   try {
--    const record = await createInjectionRecord(targetUser.id);
-+    const defaults = await getGlobalSettings();
-+    const record = await createInjectionRecord(targetUser.id, {
-+      medication: medication ?? defaults?.medication ?? null,
-+      doseMg: doseMg ?? (defaults?.dose_mg ?? null),
-+      performedAt,
-+      rawUnits,
-+      adminUserId: interaction.user.id,
-+    });
- 
-     if (record) {
-       logger.info(
-         `Admin ${interaction.user.tag} logged injection for ${targetUser.tag}: ${record.leg} leg on ${record.date}.`,
-       );
-+      await recordAdminAction({
-+        adminUserId: interaction.user.id,
-+        targetUserId: targetUser.id,
-+        action: 'logfor',
-+        logId: record.id,
-+        details: `Dose ${record.dose_mg ?? 'n/a'} mg, units ${record.raw_units ?? 'n/a'}, performed_at ${record.performed_at ?? 'n/a'}`,
-+      });
-       await interaction.editReply(
--        `Injection recorded for ${targetUser.username}: **${record.leg} leg** on **${record.date}**.`,
-+        `Injection recorded for ${targetUser.username}: **${record.leg} leg** on **${record.date}**${record.medication ? ` | Medication: ${record.medication}` : ''}${
-+          record.dose_mg !== null && record.dose_mg !== undefined
-+            ? ` | Dose: ${record.dose_mg} mg`
-+            : ''
-+        }.`,
+@@ -51,7 +51,7 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
        );
      } else {
-       logger.error(
-diff --git a/src/handlers/nextInjectionCommand.ts b/src/handlers/nextInjectionCommand.ts
-index 19a4d57..8104f0f 100644
---- a/src/handlers/nextInjectionCommand.ts
-+++ b/src/handlers/nextInjectionCommand.ts
-@@ -7,11 +7,11 @@ import { DateTime } from 'luxon';
- import {
-   describeTimeUntil,
-   formatDateTimeForDisplay,
-+  formatTimestampForDisplay,
-   getNextInjectionDateTime,
-   isValidTimeZone,
-   getAnchorDateTime,
- } from '../time';
--import { DateTime } from 'luxon';
- 
- export async function handleNextInjectionCommand(
-   interaction: CommandInteraction,
-@@ -39,7 +39,10 @@ export async function handleNextInjectionCommand(
-         timezone,
-       );
-       if (anchor) {
--        settings.start_time = anchor.toISO();
-+        const iso = anchor.toISO();
-+        if (iso) {
-+          settings.start_time = iso;
-+        }
-       }
-     }
-     const now = DateTime.now().setZone(timezone);
-@@ -69,7 +72,7 @@ export async function handleNextInjectionCommand(
-         ? `${settings.dose_mg} mg`
-         : 'Unspecified';
-     const anchorLabel = settings.start_time
--      ? formatDateTimeForDisplay(
-+      ? formatTimestampForDisplay(
-           settings.start_time,
-           interaction.locale ?? 'en-US',
-           timezone,
-diff --git a/src/handlers/setInjectionScheduleCommand.ts b/src/handlers/setInjectionScheduleCommand.ts
-index 2b30650..3e8f560 100644
---- a/src/handlers/setInjectionScheduleCommand.ts
-+++ b/src/handlers/setInjectionScheduleCommand.ts
-@@ -2,8 +2,10 @@
- import type { CommandInteraction } from 'discord.js'; // Import type
- import { MessageFlags, PermissionFlagsBits } from 'discord.js'; // Import MessageFlags
- import type { GlobalSettings } from '../database';
--import { setGlobalSettings } from '../database';
-+import { setGlobalSettings, getGlobalSettings } from '../database';
- import logger from '../logger';
-+import { isValidTimeZone } from '../time';
-+import { getAnchorDateTime } from '../time';
- 
- const dayNameToNumber: { [key: string]: number } = {
-   /* ... as before ... */ sunday: 0,
-@@ -44,6 +46,9 @@ export async function handleSetInjectionScheduleCommand(
-   const dayOption = interaction.options.get('day', true);
-   const timeOption = interaction.options.get('time', true);
-   const timezoneOption = interaction.options.get('timezone');
-+  const intervalOption = interaction.options.get('interval_days');
-+  const medicationOption = interaction.options.get('medication');
-+  const doseOption = interaction.options.get('dose_mg');
- 
-   if (
-     typeof dayOption.value !== 'string' ||
-@@ -62,6 +67,15 @@ export async function handleSetInjectionScheduleCommand(
-   const timezone =
-     typeof timezoneOption?.value === 'string' ? timezoneOption.value : 'UTC';
- 
-+  if (!isValidTimeZone(timezone)) {
-+    await interaction.reply({
-+      content:
-+        'Invalid timezone provided. Please use a valid IANA timezone (e.g., UTC, America/New_York).',
-+      flags: MessageFlags.Ephemeral,
-+    });
-+    return;
-+  }
-+
-   const injection_day = dayNameToNumber[dayName];
-   if (injection_day === undefined) {
-     // Use flags for reply
-@@ -82,25 +96,69 @@ export async function handleSetInjectionScheduleCommand(
-     return;
-   }
- 
-+  const interval_days =
-+    intervalOption && typeof intervalOption.value === 'number'
-+      ? intervalOption.value
-+      : 7;
-+  if (interval_days <= 0 || interval_days > 30) {
-+    await interaction.reply({
-+      content: 'Interval must be between 1 and 30 days.',
-+      flags: MessageFlags.Ephemeral,
-+    });
-+    return;
-+  }
-+
-+  const medication =
-+    medicationOption && typeof medicationOption.value === 'string'
-+      ? medicationOption.value
-+      : null;
-+  const dose_mg =
-+    doseOption && typeof doseOption.value === 'number'
-+      ? doseOption.value
-+      : null;
-+
-+  const anchor = getAnchorDateTime(injection_day, time, timezone);
-+  if (!anchor) {
-+    await interaction.reply({
-+      content:
-+        'Could not compute the first reminder time. Please double-check the day, time, and timezone.',
-+      flags: MessageFlags.Ephemeral,
-+    });
-+    return;
-+  }
-+
-   // Use flags for deferReply
-   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
- 
-+  const existing = await getGlobalSettings();
-+
-   const newSettings: Omit<GlobalSettings, 'id'> = {
-     injection_day,
-     injection_time: time,
-     timezone,
-+    interval_days,
-+    start_time: anchor.toISO(),
-+    medication,
-+    dose_mg,
-+    test_start_time: existing?.test_start_time ?? null,
-+    test_interval_days: existing?.test_interval_days ?? null,
-+    test_timezone: existing?.test_timezone ?? timezone,
-+    last_run_at: existing?.last_run_at ?? null,
-+    test_last_run_at: existing?.test_last_run_at ?? null,
-   };
- 
-   const success = await setGlobalSettings(newSettings);
- 
-   if (success) {
-     logger.info(
--      `Injection schedule updated by ${interaction.user.tag} to ${dayName} at ${time} (${timezone}).`,
-+      `Injection schedule updated by ${interaction.user.tag} to ${dayName} at ${time} (${timezone}), every ${interval_days} day(s).`,
-     );
-     try {
-       await triggerReschedule();
        await interaction.editReply(
--        `Injection schedule updated to ${dayOption.value} at ${time} (${timezone}). The scheduler has been updated.`,
-+        `Injection schedule updated to ${dayOption.value} at ${time} (${timezone}), every ${interval_days} day(s). The scheduler has been updated.${medication ? ` Medication: ${medication}.` : ''}${
-+          dose_mg ? ` Default dose: ${dose_mg} mg.` : ''
-+        }`,
+-        `No injection logs found for ${userToCheck.username}.`,
++        `No injection logs yet for ${userToCheck.username}. Run /injection in the designated channel when you are ready to start tracking.`,
        );
-       logger.info('Scheduler successfully updated following schedule change.');
-     } catch (rescheduleError) {
-diff --git a/src/handlers/statsCommand.ts b/src/handlers/statsCommand.ts
-index efe9f53..f609a88 100644
---- a/src/handlers/statsCommand.ts
-+++ b/src/handlers/statsCommand.ts
-@@ -67,22 +67,25 @@ export async function handleStatsCommand(interaction: CommandInteraction) {
-     // Iterate backwards from the second-to-last record
-     for (let i = records.length - 1; i > 0; i--) {
-       try {
--        // Ensure created_at exists and is a valid date string/object
--        if (!records[i]?.created_at || !records[i - 1]?.created_at) {
-+        const currentDateSrc = records[i]?.performed_at || records[i]?.injection_date;
-+        const prevDateSrc =
-+          records[i - 1]?.performed_at || records[i - 1]?.injection_date;
-+
-+        if (!currentDateSrc || !prevDateSrc) {
-           logger.warn(
--            `Missing created_at date during streak calculation for user ${userIdToCheck}:`,
-+            `Missing performed_at date during streak calculation for user ${userIdToCheck}:`,
-             { record_i: records[i], record_i_1: records[i - 1] },
-           );
-           break; // Skip calculation if dates are missing
-         }
- 
--        const current = new Date(records[i].created_at);
--        const prev = new Date(records[i - 1].created_at);
-+        const current = new Date(currentDateSrc);
-+        const prev = new Date(prevDateSrc);
- 
-         if (isNaN(current.getTime()) || isNaN(prev.getTime())) {
-           logger.warn(
-             `Invalid date encountered during streak calculation for user ${userIdToCheck}:`,
--            { current: records[i].created_at, prev: records[i - 1].created_at },
-+            { current: currentDateSrc, prev: prevDateSrc },
-           );
-           break;
-         }
-diff --git a/src/scheduler.ts b/src/scheduler.ts
-index 34c54c3..13c3b48 100644
---- a/src/scheduler.ts
-+++ b/src/scheduler.ts
-@@ -1,84 +1,82 @@
- // src/scheduler.ts
--import type {
--  Client,
--  TextChannel,
--  MessageComponentInteraction,
--} from 'discord.js';
--import {
--  ActionRowBuilder,
--  ButtonBuilder,
--  ButtonStyle,
--  EmbedBuilder,
--} from 'discord.js';
--import * as cron from 'node-cron';
--import type { ScheduledTask } from 'node-cron';
-+import type { Client, TextChannel } from 'discord.js';
-+import { EmbedBuilder } from 'discord.js';
- import type { GlobalSettings } from './database';
--import { getGlobalSettings } from './database'; // Ensure this is correctly imported
-+import { getGlobalSettings, updateSchedulerRunTimes } from './database'; // Ensure this is correctly imported
- import logger from './logger';
- import { config } from './config';
-+import {
-+  getNextInjectionDateTime,
-+  isValidTimeZone,
-+  getAnchorDateTime,
-+  getNextFromAnchor,
-+} from './time';
-+import { DateTime } from 'luxon';
-+
-+const MAX_TIMEOUT = 2 ** 31 - 1;
- 
--let promptTask: ScheduledTask | null = null;
--let reminderTask: ScheduledTask | null = null;
-+let promptTimeout: NodeJS.Timeout | null = null;
-+let reminderTimeout: NodeJS.Timeout | null = null;
-+let testReminderTimeout: NodeJS.Timeout | null = null;
- let currentClient: Client | null = null;
-+let currentSettings: GlobalSettings | null = null;
- 
--// Helper: compute next injection Date based on global settings.
--function computeNextInjectionDate(settings: GlobalSettings): Date | null {
--  try {
--    if (
--      !settings ||
--      typeof settings.injection_day !== 'number' ||
--      !settings.injection_time
--    ) {
--      logger.error(
--        'Invalid settings provided to computeNextInjectionDate:',
--        settings,
-+// Renamed internal function slightly to avoid potential conflict with export name if any
-+function clearScheduled() {
-+  if (promptTimeout) {
-+    clearTimeout(promptTimeout);
-+    promptTimeout = null;
-+    logger.info('Cleared existing prompt timeout.');
-+  }
-+  if (reminderTimeout) {
-+    clearTimeout(reminderTimeout);
-+    reminderTimeout = null;
-+    logger.info('Cleared existing reminder timeout.');
-+  }
-+  if (testReminderTimeout) {
-+    clearTimeout(testReminderTimeout);
-+    testReminderTimeout = null;
-+    logger.info('Cleared existing hormone test reminder timeout.');
-+  }
-+}
-+
-+function scheduleTimeout(
-+  target: DateTime,
-+  callback: () => Promise<void>,
-+  label: string,
-+): NodeJS.Timeout {
-+  let timeout: NodeJS.Timeout;
-+  const scheduleChunk = () => {
-+    const now = DateTime.now().setZone(target.zoneName ?? undefined);
-+    const delayMs = target.diff(now, 'milliseconds').milliseconds;
-+    if (delayMs <= 0) {
-+      logger.warn(
-+        `${label} time is in the past; executing immediately. target=${target.toISO()}`,
-       );
--      return null;
-+      void callback();
-+      return;
      }
--    const now = new Date();
--    const [hourStr, minuteStr] = settings.injection_time.split(':');
--    const hour = parseInt(hourStr, 10);
--    const minute = parseInt(minuteStr, 10);
--    if (
--      isNaN(hour) ||
--      isNaN(minute) ||
--      hour < 0 ||
--      hour > 23 ||
--      minute < 0 ||
--      minute > 59
--    ) {
--      logger.error(
--        `Invalid time format in settings: ${settings.injection_time}`,
-+    if (delayMs > MAX_TIMEOUT) {
-+      logger.info(
-+        `${label} is more than ${Math.round(
-+          MAX_TIMEOUT / (1000 * 60 * 60 * 24),
-+        )} days away; scheduling intermediate wake-up.`,
-       );
--      return null;
-+      timeout = setTimeout(scheduleChunk, MAX_TIMEOUT);
-+    } else {
-+      timeout = setTimeout(() => {
-+        void callback();
-+      }, delayMs);
-     }
--    let nextInjection = new Date();
--    nextInjection.setHours(hour, minute, 0, 0);
--    const currentDay = now.getDay();
--    let daysUntil = (settings.injection_day - currentDay + 7) % 7;
--    if (daysUntil === 0 && now.getTime() >= nextInjection.getTime()) {
--      daysUntil = 7;
--    }
--    nextInjection.setDate(now.getDate() + daysUntil);
--    return nextInjection;
--  } catch (error) {
--    logger.error('Error computing next injection date:', error);
--    return null;
--  }
--} // Closing brace for computeNextInjectionDate
-+  };
-+  scheduleChunk();
-+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-+  return timeout!;
-+}
- 
--// Renamed internal function slightly to avoid potential conflict with export name if any
- async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
--  if (promptTask) {
--    promptTask.stop();
--    promptTask = null;
--    logger.info('Stopped existing prompt task.');
--  }
--  if (reminderTask) {
--    reminderTask.stop();
--    reminderTask = null;
--    logger.info('Stopped existing reminder task.');
--  }
-+  clearScheduled();
-+  currentSettings = settings;
- 
-   const channelId = config.designatedChannelId;
-   if (!channelId) {
-@@ -88,7 +86,30 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
+     return;
+diff --git a/src/handlers/injectionCommand.ts b/src/handlers/injectionCommand.ts
+index 4a2a514..b85e45a 100644
+--- a/src/handlers/injectionCommand.ts
++++ b/src/handlers/injectionCommand.ts
+@@ -24,14 +24,14 @@ export async function handleInjectionCommand(
+   if (!config.designatedChannelId) {
+     await interaction.reply({
+       content:
+-        'The bot is not configured with a designated channel. Please ask an admin to set DESIGNATED_CHANNEL_ID.',
++        'I need a home channel to keep injection logs tidy. Please ask an admin to set DESIGNATED_CHANNEL_ID (usually the HRT check-ins channel).',
+       flags: MessageFlags.Ephemeral,
+     });
+     return;
+   }
+   if (interaction.channelId !== config.designatedChannelId) {
+     await interaction.reply({
+-      content: `This command can only be used in the designated channel (<#${config.designatedChannelId}>).`,
++      content: `Please log injections in <#${config.designatedChannelId}> so reminders stay organized. If you cannot see it, ask a mod for access.`,
+       flags: MessageFlags.Ephemeral, // Use flags
+     });
+     return;
+@@ -70,7 +70,7 @@ export async function handleInjectionCommand(
+     // ... (rest of embed setup)
+     .setTitle('Injection Confirmation')
+     .setDescription(
+-      'Press the button below to confirm you have completed your injection.',
++      'Tap Confirm to save this injection. Replies stay private to you, and it is okay to leave dose/medication blank if you are unsure. I only keep your last 5 logs.',
+     )
+     .setColor(0x1abc9c)
+     .setThumbnail(
+@@ -146,7 +146,7 @@ export async function handleInjectionCommand(
+           ? `\nPerformed at: **${record.performed_at}**`
+           : '';
+         replyOptions = {
+-          content: `Injection recorded successfully: **${record.leg} leg** on **${record.date}**.${medLabel}${doseLabel}${unitLabel}${performedLabel}`,
++          content: `Injection recorded successfully: **${record.leg} leg** on **${record.date}**.${medLabel}${doseLabel}${unitLabel}${performedLabel}\nNice job taking care of yourself.`,
+           embeds: [],
+           components: [],
+         };
+diff --git a/src/handlers/setHormoneTestCommand.ts b/src/handlers/setHormoneTestCommand.ts
+index d6aa36e..ac5f970 100644
+--- a/src/handlers/setHormoneTestCommand.ts
++++ b/src/handlers/setHormoneTestCommand.ts
+@@ -53,7 +53,7 @@ export async function handleSetHormoneTestCommand(
      return;
    }
  
--  const nextInjectionDate = computeNextInjectionDate(settings);
-+  if (!settings.start_time) {
-+    const anchor = getAnchorDateTime(
-+      settings.injection_day,
-+      settings.injection_time,
-+      settings.timezone,
-+    );
-+    if (anchor) {
-+      const iso = anchor.toISO();
-+      if (iso) {
-+        settings.start_time = iso;
-+        logger.warn('start_time missing in settings; using computed anchor.');
-+      } else {
-+        logger.error('Failed to derive ISO string for start_time.');
-+        return;
-+      }
-+    } else {
-+      logger.error(
-+        'start_time missing and could not compute anchor. Aborting scheduling.',
-+      );
-+      return;
-+    }
-+  }
-+
-+  const nextInjectionDate = getNextInjectionDateTime(settings);
-   if (!nextInjectionDate) {
-     logger.error(
-       'Could not compute next injection date from settings. Aborting schedule.',
-@@ -96,117 +117,268 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
-     return;
-   }
+-  let startIso: string;
++  let startIso: string | null = null;
+   if (startDateOpt && typeof startDateOpt.value === 'string') {
+     const parsed = DateTime.fromISO(startDateOpt.value, {
+       zone: timezone ?? 'UTC',
+diff --git a/src/time.ts b/src/time.ts
+index 6af4c1e..76e9fc6 100644
+--- a/src/time.ts
++++ b/src/time.ts
+@@ -61,10 +61,7 @@ export function getNextInjectionDateTime(
+   const zonedNow = now.setZone(timezone);
+   const anchorSource = settings.start_time;
+   if (!anchorSource) return null;
+-  const anchor =
+-    anchorSource instanceof Date
+-      ? DateTime.fromJSDate(anchorSource).setZone(timezone)
+-      : DateTime.fromISO(String(anchorSource), { zone: timezone });
++  const anchor = DateTime.fromISO(String(anchorSource), { zone: timezone });
  
--  const [hour, minute] = settings.injection_time.split(':');
--  const cronTimezone = settings.timezone || 'UTC';
--
--  const promptCron = `${minute} ${hour} * * ${settings.injection_day}`;
--  logger.info(
--    `Scheduling prompt job with cron: "${promptCron}" in timezone "${cronTimezone}"`,
--  );
--
--  promptTask = cron.schedule(
--    promptCron,
--    async () => {
--      // Opening brace for async callback (matches related info start point)
--      logger.info(
--        `Injection prompt job triggered for ${settings.injection_day} at ${settings.injection_time} ${cronTimezone}.`,
--      );
--      try {
--        // Opening brace for try block
--        const channel = (await client.channels.fetch(channelId).catch((err) => {
--          logger.error(`Failed to fetch channel ${channelId} for prompt:`, err);
--          return null;
--        })) as TextChannel | null;
--
--        if (!channel) {
--          logger.error(
--            `Designated channel ${channelId} not found or accessible for injection prompt.`,
--          );
--          return; // Exit if channel not found
--        }
-+  const timezone =
-+    settings.timezone && isValidTimeZone(settings.timezone)
-+      ? settings.timezone
-+      : 'UTC';
+   if (!anchor || !anchor.isValid) return null;
  
--        const promptEmbed = new EmbedBuilder()
--          .setTitle('Injection Reminder')
-+  // Catch-up: if we missed the last scheduled prompt, send a catch-up notice
-+  const intervalDaysNum = Number(settings.interval_days) || 7;
-+  const lastRun = settings.last_run_at
-+    ? DateTime.fromISO(settings.last_run_at, { zone: timezone })
-+    : null;
-+  const previousInjection = nextInjectionDate.minus({ days: intervalDaysNum });
-+  if (!lastRun || (previousInjection.isValid && lastRun < previousInjection)) {
-+    try {
-+      const channel = (await client.channels.fetch(channelId).catch((err) => {
-+        logger.error(
-+          `Failed to fetch channel ${channelId} for catch-up prompt:`,
-+          err,
-+        );
-+        return null;
-+      })) as TextChannel | null;
-+      if (channel) {
-+        const medLabel =
-+          settings.medication || settings.medication === ''
-+            ? settings.medication
-+            : 'Injection';
-+        const doseLabel =
-+          settings.dose_mg !== null && settings.dose_mg !== undefined
-+            ? `Dose: **${settings.dose_mg} mg**`
-+            : '';
-+        const catchupEmbed = new EmbedBuilder()
-+          .setTitle(`${medLabel} Reminder (Catch-up)`)
-           .setDescription(
--            "It's injection time! Please log your injection using the `/injection` command.",
--          )
--          .setColor(0x1abc9c)
--          .setThumbnail(
--            'https://cdn1.iconfinder.com/data/icons/medical-1-3/128/3-512.png',
-+            `A scheduled reminder may have been missed while the bot was offline. Please ensure your last injection is logged.${doseLabel ? `\n${doseLabel}` : ''}`,
-           )
-+          .setColor(0xe67e22)
-           .setTimestamp();
-+        await channel.send({ embeds: [catchupEmbed] });
-+        logger.info('Sent catch-up injection reminder.');
-+      }
-+      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
-+    } catch (err) {
-+      logger.error('Failed to send catch-up reminder', err);
-+    }
-+  }
-+
-+  const scheduleNext = async () => {
-+    await internalScheduleJobs(client, currentSettings as GlobalSettings);
-+  };
-+
-+  const sendPrompt = async () => {
-+    logger.info(
-+      `Injection prompt triggered for ${nextInjectionDate.toISO()} (${timezone}).`,
-+    );
-+    try {
-+      const channel = (await client.channels.fetch(channelId).catch((err) => {
-+        logger.error(`Failed to fetch channel ${channelId} for prompt:`, err);
-+        return null;
-+      })) as TextChannel | null;
-+
-+      if (!channel) {
-+        logger.error(
-+          `Designated channel ${channelId} not found or accessible for injection prompt.`,
-+        );
-+        return; // Exit if channel not found
-+      }
-+
-+      const medLabel =
-+        settings.medication || settings.medication === ''
-+          ? settings.medication
-+          : 'Injection';
-+      const doseLabel =
-+        settings.dose_mg !== null && settings.dose_mg !== undefined
-+          ? `Dose: **${settings.dose_mg} mg**`
-+          : '';
-+
-+      const promptEmbed = new EmbedBuilder()
-+        .setTitle(`${medLabel} Reminder`)
-+        .setDescription(
-+          `It's injection time! Please log your injection using the \`/injection\` command.${doseLabel ? `\n${doseLabel}` : ''}`,
-+        )
-+        .setColor(0x1abc9c)
-+        .setThumbnail(
-+          'https://cdn1.iconfinder.com/data/icons/medical-1-3/128/3-512.png',
-+        )
-+        .setTimestamp();
-+
-+      await channel.send({ embeds: [promptEmbed] }); // Line 87 area
-+      logger.info(`Sent injection prompt to channel ${channelId}.`); // Added for clarity
-+      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
-+    } catch (error) {
-+      // Closing brace for try, opening for catch
-+      logger.error('Error in injection prompt job execution:', error);
-+    } // Closing brace for catch
-+    // After prompt, schedule next cycle
-+    await scheduleNext();
-+  };
-+
-+  const sendReminder = async () => {
-+    logger.info(`Injection reminder triggered for 1 hour before schedule.`);
-+    try {
-+      const channel = (await client.channels.fetch(channelId).catch((err) => {
-+        logger.error(`Failed to fetch channel ${channelId} for reminder:`, err);
-+        return null;
-+      })) as TextChannel | null;
-+
-+      if (!channel) {
-+        logger.error(
-+          `Designated channel ${channelId} not found or accessible for injection reminder.`,
-+        );
-+        return;
-+      }
-+
-+      const medLabel =
-+        settings.medication || settings.medication === ''
-+          ? settings.medication
-+          : 'Injection';
-+      const doseLabel =
-+        settings.dose_mg !== null && settings.dose_mg !== undefined
-+          ? `Dose: **${settings.dose_mg} mg**`
-+          : '';
-+
-+      const reminderEmbed = new EmbedBuilder()
-+        .setTitle(`${medLabel} Reminder - 1 Hour Left`)
-+        .setDescription(
-+          `Reminder: Your injection is scheduled in approximately 1 hour. Get ready!${doseLabel ? `\n${doseLabel}` : ''}`,
-+        )
-+        .setColor(0xf1c40f)
-+        .setThumbnail(
-+          'https://cdn-icons-png.flaticon.com/512/3075/3075977.png',
-+        )
-+        .setTimestamp();
-+
-+      await channel.send({ embeds: [reminderEmbed] });
-+      logger.info(`Sent injection reminder to channel ${channelId}.`);
-+      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
-+    } catch (error) {
-+      logger.error('Error in injection reminder job execution:', error);
-+    }
-+  };
- 
--        await channel.send({ embeds: [promptEmbed] }); // Line 87 area
--        logger.info(`Sent injection prompt to channel ${channelId}.`); // Added for clarity
--      } catch (error) {
--        // Closing brace for try, opening for catch
--        logger.error('Error in injection prompt job execution:', error);
--      } // Closing brace for catch
--    },
--    {
--      // Closing brace for async callback, opening for options object
--      scheduled: true,
--      timezone: cronTimezone,
--    },
--  ); // Closing brace and parenthesis for cron.schedule call
--  logger.info(`Prompt task scheduled successfully.`);
--
--  // --- Schedule Reminder Job (1 hour before) ---
--  let reminderTime = new Date(nextInjectionDate.getTime());
--  reminderTime.setHours(reminderTime.getHours() - 1);
--  const reminderMinute = reminderTime.getMinutes();
--  const reminderHour = reminderTime.getHours();
--  const reminderDayOfWeek = reminderTime.getDay();
--  const reminderCron = `${reminderMinute} ${reminderHour} * * ${reminderDayOfWeek}`;
-   logger.info(
--    `Scheduling reminder job with cron: "${reminderCron}" in timezone "${cronTimezone}"`,
-+    `Scheduling prompt at ${nextInjectionDate.toISO()} (${timezone}) with interval ${settings.interval_days} day(s).`,
-   );
- 
--  reminderTask = cron.schedule(
--    reminderCron,
--    async () => {
--      logger.info(
--        `Injection reminder job triggered for 1 hour before schedule.`,
-+  promptTimeout = scheduleTimeout(nextInjectionDate, sendPrompt, 'prompt');
-+
-+  const reminderDateTime = nextInjectionDate.minus({ hours: 1 });
-+  if (reminderDateTime > DateTime.now().setZone(timezone)) {
-+    reminderTimeout = scheduleTimeout(
-+      reminderDateTime,
-+      sendReminder,
-+      'reminder',
-+    );
-+    logger.info(
-+      `Scheduling reminder at ${reminderDateTime.toISO()} (${timezone}).`,
-+    );
-+  } else {
-+    logger.warn('Reminder time is already past; skipping for this cycle.');
-+  }
-+
-+  // --- Hormone test reminder (E/T labs) ---
-+  const sendTestReminder = async () => {
-+    try {
-+      const channel = (await client.channels.fetch(channelId).catch((err) => {
-+        logger.error(
-+          `Failed to fetch channel ${channelId} for hormone test reminder:`,
-+          err,
-+        );
-+        return null;
-+      })) as TextChannel | null;
-+
-+      if (!channel) {
-+        logger.error(
-+          `Designated channel ${channelId} not found or accessible for hormone test reminder.`,
-+        );
-+        return;
-+      }
-+
-+      const tz = settings.test_timezone ?? timezone;
-+      const startLabel = settings.test_start_time ?? 'not set';
-+      const intervalLabel = settings.test_interval_days ?? 30;
-+
-+      const testEmbed = new EmbedBuilder()
-+        .setTitle('Hormone Test Reminder')
-+        .setDescription(
-+          `Time to schedule or perform your E/T labs (through day check).\nStart: ${startLabel}\nInterval: every ${intervalLabel} day(s)\nTimezone: ${tz}`,
-+        )
-+        .setColor(0x8e44ad)
-+        .setTimestamp();
-+
-+      await channel.send({ embeds: [testEmbed] });
-+      logger.info(`Sent hormone test reminder to channel ${channelId}.`);
-+      await updateSchedulerRunTimes(undefined, new Date().toISOString());
-+    } catch (error) {
-+      logger.error('Error in hormone test reminder execution:', error);
-+    }
-+    scheduleTestReminder();
-+  };
-+
-+  const scheduleTestReminder = () => {
-+    if (
-+      settings.test_start_time &&
-+      settings.test_interval_days &&
-+      settings.test_interval_days > 0
-+    ) {
-+      const nextTest = getNextFromAnchor(
-+        settings.test_start_time,
-+        Number(settings.test_interval_days),
-+        settings.test_timezone ?? timezone,
-       );
--      try {
--        const channel = (await client.channels.fetch(channelId).catch((err) => {
--          logger.error(
--            `Failed to fetch channel ${channelId} for reminder:`,
--            err,
--          );
--          return null;
--        })) as TextChannel | null;
--
--        if (!channel) {
--          logger.error(
--            `Designated channel ${channelId} not found or accessible for injection reminder.`,
--          );
--          return;
-+      if (nextTest) {
-+        const lastTestRun = settings.test_last_run_at
-+          ? DateTime.fromISO(settings.test_last_run_at, {
-+              zone: settings.test_timezone ?? timezone,
-+            })
-+          : null;
-+        const prevTest = nextTest.minus({
-+          days: Number(settings.test_interval_days),
-+        });
-+        if (!lastTestRun || (prevTest.isValid && lastTestRun < prevTest)) {
-+          // Fire a catch-up test reminder
-+          void (async () => {
-+            try {
-+              const channel = (await client.channels.fetch(channelId).catch(
-+                (err) => {
-+                  logger.error(
-+                    `Failed to fetch channel ${channelId} for test catch-up:`,
-+                    err,
-+                  );
-+                  return null;
-+                },
-+              )) as TextChannel | null;
-+              if (channel) {
-+                const testEmbed = new EmbedBuilder()
-+                  .setTitle('Hormone Test Reminder (Catch-up)')
-+                  .setDescription(
-+                    `A scheduled hormone test reminder may have been missed while the bot was offline. Please verify your upcoming labs.`,
-+                  )
-+                  .setColor(0x8e44ad)
-+                  .setTimestamp();
-+                await channel.send({ embeds: [testEmbed] });
-+                await updateSchedulerRunTimes(undefined, new Date().toISOString());
-+              }
-+            } catch (err) {
-+              logger.error('Failed to send test catch-up reminder', err);
-+            }
-+          })();
-         }
- 
--        const reminderEmbed = new EmbedBuilder()
--          .setTitle('Injection Reminder - 1 Hour Left')
--          .setDescription(
--            'Reminder: Your injection is scheduled in approximately 1 hour. Get ready!',
--          )
--          .setColor(0xf1c40f)
--          .setThumbnail(
--            'https://cdn-icons-png.flaticon.com/512/3075/3075977.png',
--          )
--          .setTimestamp();
--
--        await channel.send({ embeds: [reminderEmbed] });
--        logger.info(`Sent injection reminder to channel ${channelId}.`);
--      } catch (error) {
--        logger.error('Error in injection reminder job execution:', error);
-+        testReminderTimeout = scheduleTimeout(
-+          nextTest,
-+          sendTestReminder,
-+          'hormone-test',
-+        );
-+        logger.info(
-+          `Scheduled hormone test reminder at ${nextTest.toISO()} (${settings.test_timezone ?? timezone}) every ${settings.test_interval_days} day(s).`,
-+        );
-       }
--    },
--    {
--      scheduled: true,
--      timezone: cronTimezone,
--    },
--  );
--  logger.info(`Reminder task scheduled successfully.`);
-+    }
-+  };
-+
-+  scheduleTestReminder();
- } // Closing brace for internalScheduleJobs
- 
- // EXPORTED function called initially and when settings change
-@@ -220,8 +392,14 @@ export async function initializeScheduler(client: Client) {
-     );
-     return;
-   }
-+  if (!isValidTimeZone(settings.timezone)) {
-+    logger.warn(
-+      `Configured timezone "${settings.timezone}" is invalid. Falling back to UTC for scheduling.`,
-+    );
-+    settings.timezone = 'UTC';
-+  }
-   logger.info(
--    `Workspaceed initial settings: Day ${settings.injection_day}, Time ${settings.injection_time}, TZ ${settings.timezone}`,
-+    `Loaded initial settings: Day ${settings.injection_day}, Time ${settings.injection_time}, TZ ${settings.timezone}, Interval ${settings.interval_days} day(s)`,
-   );
-   await internalScheduleJobs(client, settings); // Call internal function
- } // Closing brace for initializeScheduler
-@@ -240,8 +418,14 @@ export async function rescheduleJobs() {
-     );
-     return;
-   }
-+  if (!isValidTimeZone(settings.timezone)) {
-+    logger.warn(
-+      `Configured timezone "${settings.timezone}" is invalid. Falling back to UTC for scheduling.`,
-+    );
-+    settings.timezone = 'UTC';
-+  }
-   logger.info(
--    `Workspaceed updated settings: Day ${settings.injection_day}, Time ${settings.injection_time}, TZ ${settings.timezone}`,
-+    `Loaded updated settings: Day ${settings.injection_day}, Time ${settings.injection_time}, TZ ${settings.timezone}, Interval ${settings.interval_days} day(s)`,
-   );
-   await internalScheduleJobs(currentClient, settings); // Call internal function
-   logger.info('Jobs rescheduled successfully.');

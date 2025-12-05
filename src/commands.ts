@@ -273,6 +273,15 @@ export async function refreshCommands(
           .setRequired(false),
       )
       .toJSON(),
+    new SlashCommandBuilder()
+      .setName('setupcheck')
+      .setDescription('Admin: quick checklist to verify config and database.')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('help')
+      .setDescription('Get a simple, friendly walkthrough for using Injekta.')
+      .toJSON(),
   ];
 
   const rest = new REST({ version: '10' }).setToken(botToken);

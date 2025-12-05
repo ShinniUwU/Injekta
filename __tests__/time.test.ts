@@ -23,6 +23,11 @@ describe('time utilities', () => {
       start_time: '2024-01-01T10:00:00Z',
       medication: null,
       dose_mg: null,
+      test_start_time: null,
+      test_interval_days: null,
+      test_timezone: 'UTC',
+      last_run_at: null,
+      test_last_run_at: null,
     };
     const now = DateTime.fromISO('2024-01-01T09:00:00', { zone: 'UTC' }); // Monday 9 AM
     const next = getNextInjectionDateTime(settings, now);
@@ -40,6 +45,11 @@ describe('time utilities', () => {
       start_time: '2024-01-01T10:00:00Z',
       medication: null,
       dose_mg: null,
+      test_start_time: null,
+      test_interval_days: null,
+      test_timezone: 'UTC',
+      last_run_at: null,
+      test_last_run_at: null,
     };
     const now = DateTime.fromISO('2024-01-01T11:00:00', { zone: 'UTC' }); // Monday 11 AM
     const next = getNextInjectionDateTime(settings, now);
@@ -57,6 +67,11 @@ describe('time utilities', () => {
       start_time: '2024-01-01T10:00:00Z',
       medication: null,
       dose_mg: null,
+      test_start_time: null,
+      test_interval_days: null,
+      test_timezone: 'UTC',
+      last_run_at: null,
+      test_last_run_at: null,
     };
     const now = DateTime.fromISO('2024-01-02T10:00:00', { zone: 'UTC' }); // 1 day later
     const next = getNextInjectionDateTime(settings, now);

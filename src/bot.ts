@@ -16,6 +16,8 @@ import logger from './logger';
 import { closeDbPool } from './database';
 import { handleConvertUnitsCommand } from './handlers/convertUnitsCommand';
 import { handleSetHormoneTestCommand } from './handlers/setHormoneTestCommand';
+import { handleHelpCommand } from './handlers/helpCommand';
+import { handleSetupCheckCommand } from './handlers/setupCheckCommand';
 
 const client = new Client({
   intents: [
@@ -81,6 +83,12 @@ client.on('interactionCreate', async (interaction) => {
         break;
       case 'sethormonetest':
         await handleSetHormoneTestCommand(interaction);
+        break;
+      case 'help':
+        await handleHelpCommand(interaction);
+        break;
+      case 'setupcheck':
+        await handleSetupCheckCommand(interaction);
         break;
       default:
         await interaction.reply({

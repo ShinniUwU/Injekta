@@ -24,14 +24,14 @@ export async function handleInjectionCommand(
   if (!config.designatedChannelId) {
     await interaction.reply({
       content:
-        'The bot is not configured with a designated channel. Please ask an admin to set DESIGNATED_CHANNEL_ID.',
+        'I need a home channel to keep injection logs tidy. Please ask an admin to set DESIGNATED_CHANNEL_ID (usually the HRT check-ins channel).',
       flags: MessageFlags.Ephemeral,
     });
     return;
   }
   if (interaction.channelId !== config.designatedChannelId) {
     await interaction.reply({
-      content: `This command can only be used in the designated channel (<#${config.designatedChannelId}>).`,
+      content: `Please log injections in <#${config.designatedChannelId}> so reminders stay organized. If you cannot see it, ask a mod for access.`,
       flags: MessageFlags.Ephemeral, // Use flags
     });
     return;
@@ -70,7 +70,7 @@ export async function handleInjectionCommand(
     // ... (rest of embed setup)
     .setTitle('Injection Confirmation')
     .setDescription(
-      'Press the button below to confirm you have completed your injection.',
+      'Tap Confirm to save this injection. Replies stay private to you, and it is okay to leave dose/medication blank if you are unsure. I only keep your last 5 logs.',
     )
     .setColor(0x1abc9c)
     .setThumbnail(
@@ -146,7 +146,7 @@ export async function handleInjectionCommand(
           ? `\nPerformed at: **${record.performed_at}**`
           : '';
         replyOptions = {
-          content: `Injection recorded successfully: **${record.leg} leg** on **${record.date}**.${medLabel}${doseLabel}${unitLabel}${performedLabel}`,
+          content: `Injection recorded successfully: **${record.leg} leg** on **${record.date}**.${medLabel}${doseLabel}${unitLabel}${performedLabel}\nNice job taking care of yourself.`,
           embeds: [],
           components: [],
         };
