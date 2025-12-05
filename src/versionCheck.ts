@@ -34,6 +34,10 @@ async function fetchLatestVersion(): Promise<string | null> {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
+    if (res.status === 404) {
+      logger.info('Version check: package not published to npm; skipping check.');
+      return null;
+    }
     if (!res.ok) {
       logger.warn('Version check failed: npm registry responded with non-OK status', {
         status: res.status,

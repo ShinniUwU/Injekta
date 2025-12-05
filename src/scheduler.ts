@@ -113,6 +113,13 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
   if (!nextInjectionDate) {
     logger.error(
       'Could not compute next injection date from settings. Aborting schedule.',
+      {
+        start_time: settings.start_time,
+        injection_day: settings.injection_day,
+        injection_time: settings.injection_time,
+        timezone: settings.timezone,
+        interval_days: settings.interval_days,
+      },
     );
     return;
   }
