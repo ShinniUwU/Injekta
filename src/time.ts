@@ -61,7 +61,29 @@ export function getNextInjectionDateTime(
   const zonedNow = now.setZone(timezone);
   const anchorSource = settings.start_time;
   if (!anchorSource) return null;
-  const anchor = DateTime.fromISO(String(anchorSource), { zone: timezone });
+  let anchor = DateTime.fromISO(String(anchorSource), { zone: timezone });
+
+  // Fallback: try parsing with JS Date if ISO parsing failed (covers legacy formats)
+  if (!anchor.isValid) {
+    const fallbackDate = new Date(String(anchorSource));
+    if (!Number.isNaN(fallbackDate.getTime())) {
+      anchor = DateTime.fromJSDate(fallbackDate).setZone(timezone);
+    }
+  }
+
+  // If still invalid, recompute an anchor based on day/time/timezone
+  if (!anchor.isValid) {
+    const recomputed = getAnchorDateTime(
+      settings.injection_day,
+      settings.injection_time,
+      timezone,
+      zonedNow,
+    );
+    if (recomputed) {
+      anchor = recomputed;
+      settings.start_time = recomputed.toISO();
+    }
+  }
 
   if (!anchor || !anchor.isValid) return null;
 
