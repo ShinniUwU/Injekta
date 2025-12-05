@@ -1,18 +1,20 @@
 # Injekta
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-**Injekta** is a Discord bot built with TypeScript designed to help manage and track Hormone Replacement Therapy (HRT) injections. It logs injection data (alternating between 'Right' and 'Left' legs), automatically keeps only the last 5 records per user, and sends weekly reminders—all integrated with a **self-hosted PostgreSQL database** for persistent data storage.
+**Injekta** is a Discord bot built with TypeScript designed to help manage and track Hormone Replacement Therapy (HRT) injections. It logs injection data (alternating between 'Right' and 'Left' legs), tracks medication and dose, supports flexible cadences (e.g., every 3.5 days, 10 days, or monthly), automatically keeps only the last 5 records per user, and sends reminders—all integrated with a **self-hosted PostgreSQL database** for persistent data storage.
 
 ## Features
 
-- **Simple Logging:** Log injections easily using the `/injection` command with button confirmation.
+- **Simple Logging:** Log injections easily using the `/injection` command with button confirmation; optionally record medication name and dose (mg).
 - **Automatic Leg Alternation:** The bot automatically determines whether the 'Right' or 'Left' leg is next based on your previous log.
-- **Log History:** View your last 5 injection logs using `/checklogs`. Older logs are automatically removed.
+- **Log History:** View your last 5 injection logs using `/checklogs` (now includes medication and dose). Older logs are automatically removed.
 - **Stats Tracking:** Check your total logged injections and current weekly streak with `/stats`.
 - **Scheduling & Reminders:**
-  - Set a global injection schedule (day, time, timezone) using `/setinjectionschedule` (Admin-only).
-  * Receive automatic reminders 1 hour before the scheduled time in a designated channel.
+  - Set a global injection schedule (day, time, timezone, interval) using `/setinjectionschedule` (Admin-only) with non-weekly cadences like every 3.5 days or every 10/30 days.
+  * Receive automatic reminders 1 hour before the scheduled time in a designated channel, including medication name and dose.
   * Receive a prompt in the designated channel when it's time to log your injection.
+- **Hormone Test Reminders:** Set monthly (or custom interval) E/T lab reminders starting from a chosen date using `/sethormonetest`.
+- **Dosing Helpers:** Convert syringe units to mg with `/convertunits` (requires vial concentration).
 - **Log Deletion:**
     - Users can delete their own latest log (or a specific one by ID) using `/deletemylog` (with confirmation).
     - Admins can delete any specific log entry for any user using `/admindeletelog`.
@@ -100,6 +102,13 @@ This bot requires a running PostgreSQL database server.
     *(Example: `psql -h localhost -p 5432 -U injekta_user -d injekta_db -f schema.sql`)*
     Enter the password for `injekta_user` when prompted.
 
+    > Upgrading from an older schema? Run the following before the bot restarts to migrate `injection_date` from the old `DD-MM-YYYY` string to a proper timestamptz:
+    > ```sql
+    > ALTER TABLE injections
+    >   ALTER COLUMN injection_date TYPE TIMESTAMPTZ USING to_timestamp(injection_date, 'DD-MM-YYYY'),
+    >   ALTER COLUMN injection_date SET DEFAULT CURRENT_TIMESTAMP;
+    > ```
+
 ## Configuration
 
 ### Environment Variables
@@ -122,6 +131,8 @@ BOT_OWNER_ID=your_discord_user_id              # Optional: Your Discord user ID 
 ````
 
 Replace placeholders like `<user>`, `<password>`, `<host>`, `<port>`, `<database_name>` in `DATABASE_URL` with the actual values for your PostgreSQL setup created in the [Database Setup](https://www.google.com/search?q=%23database-setup) step.
+
+**Timezone:** `/setinjectionschedule` validates the timezone you pass (IANA names like `UTC`, `America/New_York`). Invalid values are rejected and scheduler falls back to UTC if misconfigured.
 
 ## Usage
 
@@ -155,13 +166,15 @@ Replace placeholders like `<user>`, `<password>`, `<host>`, `<port>`, `<database
 
 ### Available Commands
 
-  * `/injection`: Log your weekly injection (requires confirmation). Must be used in the designated channel.
+  * `/injection [dose_mg] [medication] [performed_at] [raw_units]`: Log your injection (requires confirmation). Must be used in the designated channel. Use `performed_at` to backfill and optionally log raw syringe units.
   * `/checklogs [user]`: Display the last 5 injection logs for yourself or the specified user (user option requires Admin permissions).
   * `/stats [user]`: Show injection statistics (total logs, current streak) for yourself or the specified user (user option requires Admin permissions).
   * `/nextinjection`: Check the approximate time remaining until the next scheduled injection based on the global schedule.
   * `/deletemylog [log_id]`: Delete one of your own log entries. If `log_id` is provided, deletes that specific entry. If omitted, deletes your most recent entry (requires confirmation).
-  * `/setinjectionschedule <day> <time> [timezone]` (Admin-only): Set the global injection schedule (day of week, HH:MM time, optional IANA timezone like 'UTC' or 'America/New\_York').
-  * `/logfor <user>` (Admin-only): Log an injection for the specified user.
+  * `/setinjectionschedule <day> <time> [timezone] [interval_days] [medication] [dose_mg]` (Admin-only): Set the global injection schedule (day of week, HH:MM time, optional IANA timezone like 'UTC' or 'America/New\_York', interval in days to allow cadences like 3.5d/10d/30d, optional default medication/dose for reminders).
+  * `/sethormonetest [start_date] [interval_days] [timezone]` (Admin-only): Set E/T lab reminders starting from now or a specific date, repeating every N days (default 30).
+  * `/logfor <user> [dose_mg] [medication]` (Admin-only): Log an injection for the specified user.
+  * `/convertunits <units> <concentration_mg_per_ml>`: Convert syringe units to mg (assumes 100 units = 1 mL).
   * `/admindeletelog <user> <log_id>` (Admin-only): Delete a specific log entry (using its unique ID) for the specified user.
 
 ## Development

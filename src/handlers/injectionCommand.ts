@@ -2,8 +2,8 @@
 import type {
   Client,
   CommandInteraction,
-  TextChannel,
   MessageComponentInteraction,
+  Message,
   InteractionEditReplyOptions,
 } from 'discord.js';
 import {
@@ -13,7 +13,7 @@ import {
   EmbedBuilder,
   MessageFlags, // Import MessageFlags
 } from 'discord.js';
-import { createInjectionRecord } from '../database';
+import { createInjectionRecord, getGlobalSettings } from '../database';
 import { config } from '../config';
 import logger from '../logger';
 
@@ -21,6 +21,14 @@ export async function handleInjectionCommand(
   interaction: CommandInteraction,
   client: Client,
 ) {
+  if (!config.designatedChannelId) {
+    await interaction.reply({
+      content:
+        'The bot is not configured with a designated channel. Please ask an admin to set DESIGNATED_CHANNEL_ID.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
   if (interaction.channelId !== config.designatedChannelId) {
     await interaction.reply({
       content: `This command can only be used in the designated channel (<#${config.designatedChannelId}>).`,
@@ -28,6 +36,28 @@ export async function handleInjectionCommand(
     });
     return;
   }
+
+  const doseOption = interaction.options.get('dose_mg');
+  const medicationOption = interaction.options.get('medication');
+  const performedAtOption = interaction.options.get('performed_at');
+  const rawUnitsOption = interaction.options.get('raw_units');
+
+  const doseMg =
+    doseOption && typeof doseOption.value === 'number'
+      ? doseOption.value
+      : null;
+  const medication =
+    medicationOption && typeof medicationOption.value === 'string'
+      ? medicationOption.value
+      : null;
+  const performedAt =
+    performedAtOption && typeof performedAtOption.value === 'string'
+      ? performedAtOption.value
+      : null;
+  const rawUnits =
+    rawUnitsOption && typeof rawUnitsOption.value === 'number'
+      ? rawUnitsOption.value
+      : null;
 
   // Use flags for deferReply
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -73,12 +103,14 @@ export async function handleInjectionCommand(
     components: [actionRow],
   });
 
+  const replyMessage = (await interaction.fetchReply()) as Message;
+
   const filter = (i: MessageComponentInteraction) =>
     (i.customId === confirmCustomId || i.customId === cancelCustomId) &&
     i.user.id === interaction.user.id;
 
   try {
-    const buttonInteraction = await interaction.channel?.awaitMessageComponent({
+    const buttonInteraction = await replyMessage.awaitMessageComponent({
       filter,
       time: 60000,
     });
@@ -92,11 +124,29 @@ export async function handleInjectionCommand(
     if (buttonInteraction.customId === confirmCustomId) {
       await buttonInteraction.deferUpdate();
       logger.info(`Injection confirmed by ${interaction.user.tag} via button.`);
-      const record = await createInjectionRecord(interaction.user.id);
+      const defaults = await getGlobalSettings();
+      const record = await createInjectionRecord(interaction.user.id, {
+        medication: medication ?? defaults?.medication ?? null,
+        doseMg: doseMg ?? (defaults?.dose_mg ?? null),
+        performedAt,
+        rawUnits,
+      });
 
       if (record) {
+        const medLabel = record.medication ? `\nMedication: **${record.medication}**` : '';
+        const doseLabel =
+          record.dose_mg !== null && record.dose_mg !== undefined
+            ? `\nDose: **${record.dose_mg} mg**`
+            : '';
+        const unitLabel =
+          record.raw_units !== null && record.raw_units !== undefined
+            ? `\nRaw units: **${record.raw_units}**`
+            : '';
+        const performedLabel = record.performed_at
+          ? `\nPerformed at: **${record.performed_at}**`
+          : '';
         replyOptions = {
-          content: `Injection recorded successfully: **${record.leg} leg** on **${record.date}**.`,
+          content: `Injection recorded successfully: **${record.leg} leg** on **${record.date}**.${medLabel}${doseLabel}${unitLabel}${performedLabel}`,
           embeds: [],
           components: [],
         };

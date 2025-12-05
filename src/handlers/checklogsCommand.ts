@@ -5,6 +5,7 @@ import { EmbedBuilder, MessageFlags, PermissionFlagsBits } from 'discord.js';
 import { getRecentLogs } from '../database'; // <--- VERIFY THIS LINE
 import type { InjectionRecord } from '../database';
 import logger from '../logger';
+import { formatTimestampForDisplay } from '../time';
 
 // ... rest of the file (should be okay from previous updates) ...
 export async function handleChecklogsCommand(interaction: CommandInteraction) {
@@ -65,11 +66,26 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
     )
     .setTimestamp();
 
-  const fields = records.map((record) => ({
-    name: record.injection_date || 'Unknown Date',
-    value: record.leg === 'Right' ? '✅ Right leg' : '❌ Left leg',
-    inline: false,
-  }));
+  const fields = records.map((record) => {
+    const med = record.medication ? `\nMedication: ${record.medication}` : '';
+    const dose =
+      record.dose_mg !== null && record.dose_mg !== undefined
+        ? `\nDose: ${record.dose_mg} mg`
+        : '';
+    const units =
+      record.raw_units !== null && record.raw_units !== undefined
+        ? `\nUnits: ${record.raw_units}`
+        : '';
+    return {
+      name:
+        formatTimestampForDisplay(
+          record.performed_at ?? record.injection_date,
+          interaction.locale ?? 'en-US',
+        ) || 'Unknown Date',
+      value: `${record.leg === 'Right' ? '✅ Right leg' : '❌ Left leg'}${med}${dose}${units}`,
+      inline: false,
+    };
+  });
 
   logsEmbed.addFields(fields);
 

@@ -3,14 +3,20 @@ import { Pool } from 'pg';
 import type { QueryResult } from 'pg';
 import { config } from './config';
 import logger from './logger';
+import { formatTimestampForDisplay } from './time';
 
 // --- Interfaces ---
 export interface InjectionRecord {
   id: number;
   user_id: string;
   leg: 'Right' | 'Left';
-  injection_date: string; // Format DD-MM-YYYY
-  created_at: Date;
+  injection_date: string; // TIMESTAMPTZ as ISO string from pg
+  performed_at: string;
+  medication: string | null;
+  dose_mg: number | string | null;
+  raw_units: number | null;
+  created_by_admin_id: string | null;
+  created_at: string;
 }
 
 export interface GlobalSettings {
@@ -18,6 +24,15 @@ export interface GlobalSettings {
   injection_day: number;
   injection_time: string;
   timezone: string;
+  interval_days: number;
+  start_time: string | null;
+  medication: string | null;
+  dose_mg: number | null;
+  test_start_time: string | null;
+  test_interval_days: number | null;
+  test_timezone: string | null;
+  last_run_at: string | null;
+  test_last_run_at: string | null;
 }
 
 // --- Database Connection Pool ---
@@ -47,7 +62,7 @@ export async function getLastRecord(
   userId?: string,
 ): Promise<InjectionRecord | null> {
   const baseQuery =
-    'SELECT id, user_id, leg, injection_date, created_at FROM injections';
+    'SELECT id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id, created_at FROM injections';
   const params: string[] = [];
   let queryText = baseQuery;
   if (userId) {
@@ -77,8 +92,8 @@ export async function getRecentLogs(
   limit: number = 5,
 ): Promise<InjectionRecord[]> {
   const queryText = `
-        SELECT id, user_id, leg, injection_date, created_at
-        FROM injections WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`;
+        SELECT id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id, created_at
+        FROM injections WHERE user_id = $1 ORDER BY performed_at DESC, created_at DESC LIMIT $2`;
   try {
     const result: QueryResult<InjectionRecord> = await pool.query(queryText, [
       userId,
@@ -99,8 +114,8 @@ export async function getAllUserRecords(
   userId: string,
 ): Promise<InjectionRecord[]> {
   const queryText = `
-        SELECT id, user_id, leg, injection_date, created_at
-        FROM injections WHERE user_id = $1 ORDER BY created_at ASC`;
+        SELECT id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id, created_at
+        FROM injections WHERE user_id = $1 ORDER BY performed_at ASC, created_at ASC`;
   try {
     const result: QueryResult<InjectionRecord> = await pool.query(queryText, [
       userId,
@@ -160,7 +175,25 @@ export function getNextLeg(lastLeg?: string | null): 'Right' | 'Left' {
 
 export async function createInjectionRecord(
   userId: string,
-): Promise<{ leg: 'Right' | 'Left'; date: string } | null> {
+  options?: {
+    medication?: string | null;
+    doseMg?: number | null;
+    performedAt?: string | Date | null;
+    rawUnits?: number | null;
+    adminUserId?: string | null;
+  },
+): Promise<
+  | {
+      id: number;
+      leg: 'Right' | 'Left';
+      date: string;
+      medication: string | null;
+      dose_mg: number | string | null;
+      performed_at: string;
+      raw_units: number | null;
+    }
+  | null
+> {
   try {
     const lastRecord = await getLastRecord(userId);
     if (lastRecord === null && !userId) {
@@ -170,19 +203,58 @@ export async function createInjectionRecord(
     }
 
     const nextLeg = getNextLeg(lastRecord?.leg);
-    const now = new Date();
-    const day = now.getDate().toString().padStart(2, '0');
-    const month = (now.getMonth() + 1).toString().padStart(2, '0');
-    const year = now.getFullYear();
-    const injectionDate = `${day}-${month}-${year}`;
+    const parsedDose =
+      options?.doseMg === null || options?.doseMg === undefined
+        ? null
+        : Number(options.doseMg);
+    const doseValue = Number.isFinite(parsedDose) ? parsedDose : null;
+    const rawUnits =
+      options?.rawUnits === null || options?.rawUnits === undefined
+        ? null
+        : Number(options.rawUnits);
+    const rawUnitsValue =
+      Number.isFinite(rawUnits) && rawUnits >= 0 ? Math.floor(rawUnits) : null;
+
+    let performedAtValue: Date;
+    if (options?.performedAt instanceof Date) {
+      performedAtValue = options.performedAt;
+    } else if (typeof options?.performedAt === 'string') {
+      const parsed = new Date(options.performedAt);
+      performedAtValue = isNaN(parsed.getTime()) ? new Date() : parsed;
+    } else {
+      performedAtValue = new Date();
+    }
+
     const insertQuery = `
-            INSERT INTO injections (user_id, leg, injection_date)
-            VALUES ($1, $2, $3) RETURNING leg, injection_date`;
-    const params = [userId, nextLeg, injectionDate];
+            INSERT INTO injections (user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id, leg, injection_date, performed_at, medication, dose_mg, raw_units`;
+    const params = [
+      userId,
+      nextLeg,
+      performedAtValue,
+      performedAtValue,
+      options?.medication ?? null,
+      doseValue,
+      rawUnitsValue,
+      options?.adminUserId ?? null,
+    ];
     const result = await pool.query(insertQuery, params);
     if (result.rowCount === 1) {
       await enforceMaxFiveRecords(userId);
-      return { leg: result.rows[0].leg, date: result.rows[0].injection_date };
+      const formattedDate = formatTimestampForDisplay(
+        result.rows[0].performed_at,
+        'en-US',
+      );
+      return {
+        id: result.rows[0].id,
+        leg: result.rows[0].leg,
+        date: formattedDate,
+        medication: result.rows[0].medication,
+        dose_mg: result.rows[0].dose_mg,
+        performed_at: result.rows[0].performed_at,
+        raw_units: result.rows[0].raw_units,
+      };
     } else {
       logger.error('PostgreSQL error inserting new record: No rows returned', {
         userId,
@@ -200,7 +272,7 @@ export async function createInjectionRecord(
 
 export async function getGlobalSettings(): Promise<GlobalSettings | null> {
   const queryText =
-    'SELECT id, injection_day, injection_time, timezone FROM global_settings WHERE id = 1 LIMIT 1';
+    'SELECT id, injection_day, injection_time, timezone, interval_days, start_time, medication, dose_mg, test_start_time, test_interval_days, test_timezone, last_run_at, test_last_run_at FROM global_settings WHERE id = 1 LIMIT 1';
   try {
     const result: QueryResult<GlobalSettings> = await pool.query(queryText);
     if (result.rows.length > 0) {
@@ -221,16 +293,34 @@ export async function setGlobalSettings(
   settings: Omit<GlobalSettings, 'id'>,
 ): Promise<boolean> {
   const queryText = `
-        INSERT INTO global_settings (id, injection_day, injection_time, timezone)
-        VALUES (1, $1, $2, $3)
+        INSERT INTO global_settings (id, injection_day, injection_time, timezone, interval_days, start_time, medication, dose_mg, test_start_time, test_interval_days, test_timezone, last_run_at, test_last_run_at)
+        VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         ON CONFLICT (id) DO UPDATE SET
             injection_day = EXCLUDED.injection_day,
             injection_time = EXCLUDED.injection_time,
-            timezone = EXCLUDED.timezone`;
+            timezone = EXCLUDED.timezone,
+            interval_days = EXCLUDED.interval_days,
+            start_time = EXCLUDED.start_time,
+            medication = EXCLUDED.medication,
+            dose_mg = EXCLUDED.dose_mg,
+            test_start_time = EXCLUDED.test_start_time,
+            test_interval_days = EXCLUDED.test_interval_days,
+            test_timezone = EXCLUDED.test_timezone,
+            last_run_at = EXCLUDED.last_run_at,
+            test_last_run_at = EXCLUDED.test_last_run_at`;
   const params = [
     settings.injection_day,
     settings.injection_time,
     settings.timezone,
+    settings.interval_days,
+    settings.start_time,
+    settings.medication,
+    settings.dose_mg,
+    settings.test_start_time,
+    settings.test_interval_days,
+    settings.test_timezone,
+    settings.last_run_at,
+    settings.test_last_run_at,
   ];
   try {
     const result = await pool.query(queryText, params);
@@ -350,4 +440,46 @@ export async function closeDbPool() {
   logger.info('Closing PostgreSQL connection pool...');
   await pool.end();
   logger.info('PostgreSQL pool closed.');
+}
+
+// --- Admin actions audit ---
+export async function recordAdminAction(params: {
+  adminUserId: string;
+  targetUserId?: string;
+  action: string;
+  logId?: number;
+  details?: string;
+}) {
+  const query = `
+    INSERT INTO admin_actions (admin_user_id, target_user_id, action, log_id, details)
+    VALUES ($1, $2, $3, $4, $5)`;
+  const values = [
+    params.adminUserId,
+    params.targetUserId ?? null,
+    params.action,
+    params.logId ?? null,
+    params.details ?? null,
+  ];
+  try {
+    await pool.query(query, values);
+  } catch (error) {
+    logger.error('Failed to record admin action', { params, pgError: error });
+  }
+}
+
+export async function updateSchedulerRunTimes(
+  lastRunAt?: string,
+  testLastRunAt?: string,
+) {
+  const query = `
+    UPDATE global_settings
+    SET
+      last_run_at = COALESCE($1, last_run_at),
+      test_last_run_at = COALESCE($2, test_last_run_at)
+    WHERE id = 1`;
+  try {
+    await pool.query(query, [lastRunAt ?? null, testLastRunAt ?? null]);
+  } catch (error) {
+    logger.error('Failed to update scheduler run times', { pgError: error });
+  }
 }

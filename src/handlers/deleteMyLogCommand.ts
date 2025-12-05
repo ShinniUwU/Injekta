@@ -2,6 +2,7 @@
 import type {
   CommandInteraction,
   MessageComponentInteraction,
+  Message,
 } from 'discord.js';
 import {
   ActionRowBuilder,
@@ -13,6 +14,7 @@ import {
 } from 'discord.js'; // Keep type import
 import { deleteLogById, deleteLatestLogForUser } from '../database';
 import logger from '../logger';
+import { formatTimestampForDisplay } from '../time';
 
 export async function handleDeleteMyLogCommand(
   interaction: CommandInteraction,
@@ -82,12 +84,14 @@ export async function handleDeleteMyLogCommand(
     components: [actionRow],
   });
 
+  const replyMessage = (await interaction.fetchReply()) as Message;
+
   const filter = (i: MessageComponentInteraction) =>
     (i.customId === confirmCustomId || i.customId === cancelCustomId) &&
     i.user.id === interaction.user.id;
 
   try {
-    const buttonInteraction = await interaction.channel?.awaitMessageComponent({
+    const buttonInteraction = await replyMessage.awaitMessageComponent({
       filter,
       time: 60000, // 60 seconds timeout
     });
@@ -114,8 +118,19 @@ export async function handleDeleteMyLogCommand(
 
       if (result.success && result.deletedRecord) {
         const deletedInfo = result.deletedRecord;
+        const medLabel = deletedInfo.medication
+          ? ` | Medication: ${deletedInfo.medication}`
+          : '';
+        const doseLabel =
+          deletedInfo.dose_mg !== null && deletedInfo.dose_mg !== undefined
+            ? ` | Dose: ${deletedInfo.dose_mg} mg`
+            : '';
+        const unitLabel =
+          deletedInfo.raw_units !== null && deletedInfo.raw_units !== undefined
+            ? ` | Units: ${deletedInfo.raw_units}`
+            : '';
         replyOptions = {
-          content: `Successfully deleted log entry #${deletedInfo.id} (${deletedInfo.leg} leg on ${deletedInfo.injection_date}).`,
+          content: `Successfully deleted log entry #${deletedInfo.id} (${deletedInfo.leg} leg on ${formatTimestampForDisplay(deletedInfo.performed_at ?? deletedInfo.injection_date, interaction.locale ?? 'en-US')}${medLabel}${doseLabel}${unitLabel}).`,
           embeds: [],
           components: [],
         };

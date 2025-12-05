@@ -67,22 +67,25 @@ export async function handleStatsCommand(interaction: CommandInteraction) {
     // Iterate backwards from the second-to-last record
     for (let i = records.length - 1; i > 0; i--) {
       try {
-        // Ensure created_at exists and is a valid date string/object
-        if (!records[i]?.created_at || !records[i - 1]?.created_at) {
+        const currentDateSrc = records[i]?.performed_at || records[i]?.injection_date;
+        const prevDateSrc =
+          records[i - 1]?.performed_at || records[i - 1]?.injection_date;
+
+        if (!currentDateSrc || !prevDateSrc) {
           logger.warn(
-            `Missing created_at date during streak calculation for user ${userIdToCheck}:`,
+            `Missing performed_at date during streak calculation for user ${userIdToCheck}:`,
             { record_i: records[i], record_i_1: records[i - 1] },
           );
           break; // Skip calculation if dates are missing
         }
 
-        const current = new Date(records[i].created_at);
-        const prev = new Date(records[i - 1].created_at);
+        const current = new Date(currentDateSrc);
+        const prev = new Date(prevDateSrc);
 
         if (isNaN(current.getTime()) || isNaN(prev.getTime())) {
           logger.warn(
             `Invalid date encountered during streak calculation for user ${userIdToCheck}:`,
-            { current: records[i].created_at, prev: records[i - 1].created_at },
+            { current: currentDateSrc, prev: prevDateSrc },
           );
           break;
         }
