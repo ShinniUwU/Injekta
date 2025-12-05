@@ -213,7 +213,9 @@ export async function createInjectionRecord(
         ? null
         : Number(options.rawUnits);
     const rawUnitsValue =
-      Number.isFinite(rawUnits) && rawUnits >= 0 ? Math.floor(rawUnits) : null;
+      rawUnits !== null && Number.isFinite(rawUnits) && rawUnits >= 0
+        ? Math.floor(rawUnits)
+        : null;
 
     let performedAtValue: Date;
     if (options?.performedAt instanceof Date) {
@@ -481,5 +483,16 @@ export async function updateSchedulerRunTimes(
     await pool.query(query, [lastRunAt ?? null, testLastRunAt ?? null]);
   } catch (error) {
     logger.error('Failed to update scheduler run times', { pgError: error });
+  }
+}
+
+// --- Health checks ---
+export async function pingDatabase(): Promise<boolean> {
+  try {
+    await pool.query('SELECT 1');
+    return true;
+  } catch (error) {
+    logger.error('Database ping failed', { pgError: error });
+    return false;
   }
 }

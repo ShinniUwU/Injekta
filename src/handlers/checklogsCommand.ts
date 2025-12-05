@@ -51,7 +51,7 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
       );
     } else {
       await interaction.editReply(
-        `No injection logs found for ${userToCheck.username}.`,
+        `No injection logs yet for ${userToCheck.username}. Run /injection in the designated channel when you are ready to start tracking.`,
       );
     }
     return;

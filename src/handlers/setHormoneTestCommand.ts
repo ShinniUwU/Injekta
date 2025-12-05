@@ -53,7 +53,7 @@ export async function handleSetHormoneTestCommand(
     return;
   }
 
-  let startIso: string;
+  let startIso: string | null = null;
   if (startDateOpt && typeof startDateOpt.value === 'string') {
     const parsed = DateTime.fromISO(startDateOpt.value, {
       zone: timezone ?? 'UTC',

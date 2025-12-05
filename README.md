@@ -164,9 +164,27 @@ Replace placeholders like `<user>`, `<password>`, `<host>`, `<port>`, `<database
     pm2 stop injekta
     ```
 
+### Quick start (for community members)
+
+- Go to your server's HRT or injection log channel (ask a mod if you are unsure).
+- Run `/help` for a friendly walkthrough.
+- Log your shot with `/injection` and tap Confirm; dose/medication can be left blank if you are unsure.
+- Use `/nextinjection` to see when you are due and `/checklogs` to view what you have saved. `/deletemylog` undoes mistakes.
+- What is stored: your Discord ID, timestamps, which leg, and any optional medication/dose/units you share. Bot replies are private to you. This is a tracking/reminder tool, not medical advice.
+
+### Quick setup (for non-technical admins)
+
+- Copy `.env.example` to `.env` and fill in your bot token, client ID, guild ID, database URL, and the channel you want for logging injections.
+- Create the database with `schema.sql` (ask a friend to run the provided `psql` command if you are not comfortable with terminals).
+- Install dependencies with `bun install` (or `npm install`).
+- Start the bot with `bun run dev` and run `/setupcheck` (Admin-only) in your server to confirm database and channel are wired up.
+- Use `/setinjectionschedule` so reminders and `/nextinjection` work for everyone. `/sethormonetest` is optional for lab reminders.
+
 ### Available Commands
 
   * `/injection [dose_mg] [medication] [performed_at] [raw_units]`: Log your injection (requires confirmation). Must be used in the designated channel. Use `performed_at` to backfill and optionally log raw syringe units.
+  * `/help`: Friendly quickstart and tips for transfem/transmasc users.
+  * `/setupcheck`: Admin-only checklist for database + channel configuration.
   * `/checklogs [user]`: Display the last 5 injection logs for yourself or the specified user (user option requires Admin permissions).
   * `/stats [user]`: Show injection statistics (total logs, current streak) for yourself or the specified user (user option requires Admin permissions).
   * `/nextinjection`: Check the approximate time remaining until the next scheduled injection based on the global schedule.

@@ -61,10 +61,7 @@ export function getNextInjectionDateTime(
   const zonedNow = now.setZone(timezone);
   const anchorSource = settings.start_time;
   if (!anchorSource) return null;
-  const anchor =
-    anchorSource instanceof Date
-      ? DateTime.fromJSDate(anchorSource).setZone(timezone)
-      : DateTime.fromISO(String(anchorSource), { zone: timezone });
+  const anchor = DateTime.fromISO(String(anchorSource), { zone: timezone });
 
   if (!anchor || !anchor.isValid) return null;
 
