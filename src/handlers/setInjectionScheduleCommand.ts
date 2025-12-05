@@ -2,8 +2,10 @@
 import type { CommandInteraction } from 'discord.js'; // Import type
 import { MessageFlags, PermissionFlagsBits } from 'discord.js'; // Import MessageFlags
 import type { GlobalSettings } from '../database';
-import { setGlobalSettings } from '../database';
+import { setGlobalSettings, getGlobalSettings } from '../database';
 import logger from '../logger';
+import { isValidTimeZone } from '../time';
+import { getAnchorDateTime } from '../time';
 
 const dayNameToNumber: { [key: string]: number } = {
   /* ... as before ... */ sunday: 0,
@@ -44,6 +46,9 @@ export async function handleSetInjectionScheduleCommand(
   const dayOption = interaction.options.get('day', true);
   const timeOption = interaction.options.get('time', true);
   const timezoneOption = interaction.options.get('timezone');
+  const intervalOption = interaction.options.get('interval_days');
+  const medicationOption = interaction.options.get('medication');
+  const doseOption = interaction.options.get('dose_mg');
 
   if (
     typeof dayOption.value !== 'string' ||
@@ -61,6 +66,15 @@ export async function handleSetInjectionScheduleCommand(
   const time = timeOption.value;
   const timezone =
     typeof timezoneOption?.value === 'string' ? timezoneOption.value : 'UTC';
+
+  if (!isValidTimeZone(timezone)) {
+    await interaction.reply({
+      content:
+        'Invalid timezone provided. Please use a valid IANA timezone (e.g., UTC, America/New_York).',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
 
   const injection_day = dayNameToNumber[dayName];
   if (injection_day === undefined) {
@@ -82,25 +96,69 @@ export async function handleSetInjectionScheduleCommand(
     return;
   }
 
+  const interval_days =
+    intervalOption && typeof intervalOption.value === 'number'
+      ? intervalOption.value
+      : 7;
+  if (interval_days <= 0 || interval_days > 30) {
+    await interaction.reply({
+      content: 'Interval must be between 1 and 30 days.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const medication =
+    medicationOption && typeof medicationOption.value === 'string'
+      ? medicationOption.value
+      : null;
+  const dose_mg =
+    doseOption && typeof doseOption.value === 'number'
+      ? doseOption.value
+      : null;
+
+  const anchor = getAnchorDateTime(injection_day, time, timezone);
+  if (!anchor) {
+    await interaction.reply({
+      content:
+        'Could not compute the first reminder time. Please double-check the day, time, and timezone.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
   // Use flags for deferReply
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const existing = await getGlobalSettings();
 
   const newSettings: Omit<GlobalSettings, 'id'> = {
     injection_day,
     injection_time: time,
     timezone,
+    interval_days,
+    start_time: anchor.toISO(),
+    medication,
+    dose_mg,
+    test_start_time: existing?.test_start_time ?? null,
+    test_interval_days: existing?.test_interval_days ?? null,
+    test_timezone: existing?.test_timezone ?? timezone,
+    last_run_at: existing?.last_run_at ?? null,
+    test_last_run_at: existing?.test_last_run_at ?? null,
   };
 
   const success = await setGlobalSettings(newSettings);
 
   if (success) {
     logger.info(
-      `Injection schedule updated by ${interaction.user.tag} to ${dayName} at ${time} (${timezone}).`,
+      `Injection schedule updated by ${interaction.user.tag} to ${dayName} at ${time} (${timezone}), every ${interval_days} day(s).`,
     );
     try {
       await triggerReschedule();
       await interaction.editReply(
-        `Injection schedule updated to ${dayOption.value} at ${time} (${timezone}). The scheduler has been updated.`,
+        `Injection schedule updated to ${dayOption.value} at ${time} (${timezone}), every ${interval_days} day(s). The scheduler has been updated.${medication ? ` Medication: ${medication}.` : ''}${
+          dose_mg ? ` Default dose: ${dose_mg} mg.` : ''
+        }`,
       );
       logger.info('Scheduler successfully updated following schedule change.');
     } catch (rescheduleError) {

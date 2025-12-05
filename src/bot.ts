@@ -13,6 +13,9 @@ import { handleAdminDeleteLogCommand } from './handlers/adminDeleteLogCommand';
 import { handleDeleteMyLogCommand } from './handlers/deleteMyLogCommand';
 import { initializeScheduler, rescheduleJobs } from './scheduler';
 import logger from './logger';
+import { closeDbPool } from './database';
+import { handleConvertUnitsCommand } from './handlers/convertUnitsCommand';
+import { handleSetHormoneTestCommand } from './handlers/setHormoneTestCommand';
 
 const client = new Client({
   intents: [
@@ -73,6 +76,12 @@ client.on('interactionCreate', async (interaction) => {
       case 'deletemylog':
         await handleDeleteMyLogCommand(interaction);
         break;
+      case 'convertunits':
+        await handleConvertUnitsCommand(interaction);
+        break;
+      case 'sethormonetest':
+        await handleSetHormoneTestCommand(interaction);
+        break;
       default:
         await interaction.reply({
           content: 'Unknown command.',
@@ -106,4 +115,20 @@ client.on('interactionCreate', async (interaction) => {
 client.login(config.botToken).catch((error) => {
   logger.error('Failed to login to Discord:', { loginError: error });
   process.exit(1);
+});
+
+const gracefulShutdown = async (signal: string) => {
+  logger.info(`Received ${signal}. Shutting down gracefully...`);
+  try {
+    await closeDbPool();
+    await client.destroy();
+  } catch (err) {
+    logger.error('Error during shutdown:', err);
+  } finally {
+    process.exit(0);
+  }
+};
+
+['SIGINT', 'SIGTERM'].forEach((sig) => {
+  process.on(sig, () => void gracefulShutdown(sig));
 });

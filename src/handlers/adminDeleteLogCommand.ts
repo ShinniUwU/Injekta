@@ -1,8 +1,9 @@
 // src/handlers/adminDeleteLogCommand.ts
-import type { CommandInteraction, User } from 'discord.js';
+import type { CommandInteraction } from 'discord.js';
 import { MessageFlags, PermissionFlagsBits } from 'discord.js';
-import { deleteLogById } from '../database';
+import { deleteLogById, recordAdminAction } from '../database';
 import logger from '../logger';
+import { formatTimestampForDisplay } from '../time';
 
 export async function handleAdminDeleteLogCommand(
   interaction: CommandInteraction,
@@ -53,8 +54,23 @@ export async function handleAdminDeleteLogCommand(
     logger.info(
       `Admin ${interaction.user.tag} deleted log ID ${logId} (belonging to ${result.deletedRecord.user_id}) for user ${targetUser.tag}.`,
     );
+    await recordAdminAction({
+      adminUserId: interaction.user.id,
+      targetUserId: targetUser.id,
+      action: 'admindeletelog',
+      logId,
+      details: `Deleted ${result.deletedRecord.leg} on ${result.deletedRecord.performed_at ?? result.deletedRecord.injection_date}`,
+    });
+    const medLabel = result.deletedRecord.medication
+      ? ` | Medication: ${result.deletedRecord.medication}`
+      : '';
+    const doseLabel =
+      result.deletedRecord.dose_mg !== null &&
+      result.deletedRecord.dose_mg !== undefined
+        ? ` | Dose: ${result.deletedRecord.dose_mg} mg`
+        : '';
     await interaction.editReply(
-      `Successfully deleted log entry #${logId} for user ${targetUser.username}. Details: ${result.deletedRecord.leg} leg on ${result.deletedRecord.injection_date}.`,
+      `Successfully deleted log entry #${logId} for user ${targetUser.username}. Details: ${result.deletedRecord.leg} leg on ${formatTimestampForDisplay(result.deletedRecord.performed_at ?? result.deletedRecord.injection_date, interaction.locale ?? 'en-US')}.${medLabel}${doseLabel}`,
     );
   } else {
     logger.warn(

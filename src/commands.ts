@@ -1,10 +1,6 @@
 // src/commands.ts
 import { REST } from '@discordjs/rest';
-import {
-  Routes,
-  ApplicationCommandOptionType,
-  PermissionFlagsBits,
-} from 'discord-api-types/v10'; // Import Permissions
+import { Routes, PermissionFlagsBits } from 'discord-api-types/v10'; // Import Permissions
 import { SlashCommandBuilder } from '@discordjs/builders';
 import logger from './logger';
 
@@ -13,7 +9,8 @@ export async function refreshCommands(
   guildId: string,
   botToken: string,
 ) {
-  if (!clientId || !guildId || !botToken) {
+  const useGlobal = process.env.NODE_ENV === 'production';
+  if (!clientId || !botToken || (!guildId && !useGlobal)) {
     logger.error(
       'Missing Client ID, Guild ID, or Bot Token for refreshing commands.',
     );
@@ -24,7 +21,34 @@ export async function refreshCommands(
     // --- Existing commands ---
     new SlashCommandBuilder()
       .setName('injection')
-      .setDescription('Log your weekly injection after confirmation.')
+      .setDescription('Log your injection after confirmation (with optional dose/medication).')
+      .addNumberOption((option) =>
+        option
+          .setName('dose_mg')
+          .setDescription('Dose in mg for this injection (e.g., 3.5)')
+          .setRequired(false)
+          .setMinValue(0.01),
+      )
+      .addStringOption((option) =>
+        option
+          .setName('medication')
+          .setDescription('Medication name (e.g., estradiol, progesterone)')
+          .setRequired(false),
+      )
+      .addStringOption((option) =>
+        option
+          .setName('performed_at')
+          .setDescription('When the injection was performed (ISO date or YYYY-MM-DD)')
+          .setRequired(false),
+      )
+      .addNumberOption((option) =>
+        option
+          .setName('raw_units')
+          .setDescription('Raw syringe units logged (optional)')
+          .setRequired(false)
+          .setMinValue(0)
+          .setMaxValue(200),
+      )
       .toJSON(),
     new SlashCommandBuilder()
       .setName('checklogs')
@@ -73,6 +97,30 @@ export async function refreshCommands(
           )
           .setRequired(false),
       )
+      .addNumberOption((option) =>
+        option
+          .setName('interval_days')
+          .setDescription(
+            'Interval between injections in days (e.g., 3.5, 10, 30). Default: 7',
+          )
+          .setRequired(false)
+          .setMinValue(1)
+          .setMaxValue(30),
+      )
+      .addStringOption((option) =>
+        option
+          .setName('medication')
+          .setDescription('Medication name for reminders (e.g., estradiol)')
+          .setRequired(false),
+      )
+      .addNumberOption((option) =>
+        option
+          .setName('dose_mg')
+          .setDescription('Default dose (mg) to display in reminders')
+          .setRequired(false)
+          .setMinValue(0.01)
+          .setMaxValue(1000),
+      )
       .toJSON(),
     new SlashCommandBuilder()
       .setName('stats')
@@ -93,6 +141,34 @@ export async function refreshCommands(
           .setName('user')
           .setDescription('The user to log an injection for.')
           .setRequired(true),
+      )
+      .addNumberOption((option) =>
+        option
+          .setName('dose_mg')
+          .setDescription('Dose in mg for this injection (e.g., 3.5)')
+          .setRequired(false)
+          .setMinValue(0.01)
+          .setMaxValue(1000),
+      )
+      .addStringOption((option) =>
+        option
+          .setName('medication')
+          .setDescription('Medication name (e.g., estradiol, progesterone)')
+          .setRequired(false),
+      )
+      .addStringOption((option) =>
+        option
+          .setName('performed_at')
+          .setDescription('When the injection was performed (ISO date or YYYY-MM-DD)')
+          .setRequired(false),
+      )
+      .addNumberOption((option) =>
+        option
+          .setName('raw_units')
+          .setDescription('Raw syringe units logged (optional)')
+          .setRequired(false)
+          .setMinValue(0)
+          .setMaxValue(200),
       )
       .toJSON(),
 
@@ -139,9 +215,62 @@ export async function refreshCommands(
             .setName('log_id')
             .setDescription(
               'The specific ID of the log entry to delete (optional).',
-            )
-            .setRequired(false)
-            .setMinValue(1), // Log IDs should be positive
+          )
+          .setRequired(false)
+          .setMinValue(1), // Log IDs should be positive
+      )
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName('convertunits')
+      .setDescription(
+        'Convert syringe units to milligrams. Assumes 100 units = 1 mL.',
+      )
+      .addNumberOption((option) =>
+        option
+          .setName('units')
+          .setDescription('Number of units in the syringe (e.g., 30)')
+          .setRequired(true)
+          .setMinValue(0.01)
+          .setMaxValue(200),
+      )
+      .addNumberOption((option) =>
+        option
+          .setName('concentration_mg_per_ml')
+          .setDescription('Vial concentration in mg/mL (e.g., 200)')
+          .setRequired(true)
+          .setMinValue(0.01)
+          .setMaxValue(2000),
+      )
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName('sethormonetest')
+      .setDescription(
+        'Set a hormone test reminder (E/T labs) starting from a date (default: now).',
+      )
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addStringOption((option) =>
+        option
+          .setName('start_date')
+          .setDescription(
+            "Start date for reminders in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:mm). Defaults to 'now'.",
+          )
+          .setRequired(false),
+      )
+      .addNumberOption((option) =>
+        option
+          .setName('interval_days')
+          .setDescription('Interval in days between reminders (default 30).')
+          .setRequired(false)
+          .setMinValue(1)
+          .setMaxValue(120),
+      )
+      .addStringOption((option) =>
+        option
+          .setName('timezone')
+          .setDescription('Timezone for reminders (e.g., UTC, America/New_York)')
+          .setRequired(false),
       )
       .toJSON(),
   ];
@@ -149,15 +278,21 @@ export async function refreshCommands(
   const rest = new REST({ version: '10' }).setToken(botToken);
 
   try {
+    const route = useGlobal
+      ? Routes.applicationCommands(clientId)
+      : Routes.applicationGuildCommands(clientId, guildId);
+
     logger.info(
-      `Started refreshing application (/) commands for guild ${guildId}.`,
+      `Started refreshing application (/) commands for ${
+        useGlobal ? 'all guilds (global)' : `guild ${guildId}`
+      }.`,
     );
-    const updatedCommands = await rest.put(
-      Routes.applicationGuildCommands(clientId, guildId),
-      { body: commands },
+    const updatedCommands = await rest.put(route, { body: commands });
+    logger.info(
+      `Successfully refreshed application (/) commands as ${
+        useGlobal ? 'global' : 'guild-scoped'
+      }.`,
     );
-    logger.info('Successfully refreshed application (/) commands.');
-    // Ensure updatedCommands is treated as an array before accessing length
     const commandCount = Array.isArray(updatedCommands)
       ? updatedCommands.length
       : 'N/A';
