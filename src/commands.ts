@@ -282,6 +282,30 @@ export async function refreshCommands(
       .setName('help')
       .setDescription('Get a simple, friendly walkthrough for using Injekta.')
       .toJSON(),
+    new SlashCommandBuilder()
+      .setName('updatecheck')
+      .setDescription('Check for git updates or configure update alerts.')
+      .addSubcommand((sub) =>
+        sub
+          .setName('check')
+          .setDescription('Manually check if a newer commit exists on origin.'),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('notify')
+          .setDescription('Enable or disable automatic update alerts.')
+          .addStringOption((option) =>
+            option
+              .setName('mode')
+              .setDescription('Turn update alerts on or off.')
+              .setRequired(true)
+              .addChoices(
+                { name: 'on', value: 'on' },
+                { name: 'off', value: 'off' },
+              ),
+          ),
+      )
+      .toJSON(),
   ];
 
   const rest = new REST({ version: '10' }).setToken(botToken);

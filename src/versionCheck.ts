@@ -1,74 +1,73 @@
 // src/versionCheck.ts
-import { readFileSync } from 'fs';
+import { execSync } from 'child_process';
 import type { TextBasedChannel } from 'discord.js';
 import { Client } from 'discord.js';
 import logger from './logger';
 import { config } from './config';
 
-const LOCAL_VERSION = (() => {
-  try {
-    const pkgRaw = readFileSync(new URL('../package.json', import.meta.url), 'utf-8');
-    const pkg = JSON.parse(pkgRaw);
-    return pkg.version as string;
-  } catch (error) {
-    logger.warn('Could not read local version from package.json', { error });
-    return '0.0.0';
-  }
-})();
+export type UpdateState = 'unknown' | 'up_to_date' | 'behind';
+export type UpdateStatus = {
+  local: string | null;
+  remote: string | null;
+  state: UpdateState;
+};
 
-function compareSemver(current: string, latest: string): number {
-  const cur = current.split('.').map((v) => parseInt(v, 10));
-  const lat = latest.split('.').map((v) => parseInt(v, 10));
-  for (let i = 0; i < 3; i += 1) {
-    const a = cur[i] || 0;
-    const b = lat[i] || 0;
-    if (a > b) return 1;
-    if (a < b) return -1;
-  }
-  return 0;
-}
+let autoNotifyEnabled = true;
+let lastNotifiedRemote: string | null = null;
 
-async function fetchLatestVersion(): Promise<string | null> {
+function runGit(command: string): string | null {
   try {
-    const res = await fetch('https://registry.npmjs.org/injekta/latest', {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
-    if (res.status === 404) {
-      logger.info('Version check: package not published to npm; skipping check.');
-      return null;
-    }
-    if (!res.ok) {
-      logger.warn('Version check failed: npm registry responded with non-OK status', {
-        status: res.status,
-        statusText: res.statusText,
-      });
-      return null;
-    }
-    const data = (await res.json()) as { version?: string };
-    return data.version ?? null;
+    return execSync(command, {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+      .toString()
+      .trim();
   } catch (error) {
-    logger.warn('Failed to check latest version from npm', { error });
+    logger.warn(`Git command failed: ${command}`, { error });
     return null;
   }
 }
 
-export async function notifyIfOutdated(client: Client) {
-  const latest = await fetchLatestVersion();
-  if (!latest) return;
+function getLocalHead(): string | null {
+  return runGit('git rev-parse HEAD');
+}
 
-  const comparison = compareSemver(LOCAL_VERSION, latest);
-  if (comparison >= 0) {
-    logger.info(`Running latest Injekta version (${LOCAL_VERSION}).`);
-    return;
+function getRemoteHead(remote = 'origin', ref = 'HEAD'): string | null {
+  const output = runGit(`git ls-remote ${remote} ${ref}`);
+  if (!output) return null;
+  const [sha] = output.split(/\s+/);
+  return sha || null;
+}
+
+const shortSha = (sha: string | null) =>
+  sha && sha.length >= 7 ? sha.slice(0, 7) : 'unknown';
+
+export function setVersionNotifyEnabled(enabled: boolean) {
+  autoNotifyEnabled = enabled;
+}
+
+export function getVersionNotifyEnabled() {
+  return autoNotifyEnabled;
+}
+
+export function getUpdateStatus(): UpdateStatus {
+  const local = getLocalHead();
+  const remote = getRemoteHead();
+  if (!local || !remote) {
+    return { local, remote, state: 'unknown' };
   }
-
-  const channelId = config.versionNotifyChannelId;
-  if (!channelId) {
-    logger.warn('No channel configured for version notifications.');
-    return;
+  if (local === remote) {
+    return { local, remote, state: 'up_to_date' };
   }
+  return { local, remote, state: 'behind' };
+}
 
+async function sendUpdateNotice(
+  client: Client,
+  status: UpdateStatus,
+  channelId: string,
+) {
   try {
     const channel = await client.channels.fetch(channelId);
     if (!channel || !channel.isTextBased()) {
@@ -83,12 +82,51 @@ export async function notifyIfOutdated(client: Client) {
       return;
     }
 
-    const textChannel = channel as TextBasedChannel & { send: (content: string) => Promise<unknown> };
+    const textChannel = channel as TextBasedChannel & {
+      send: (content: string) => Promise<unknown>;
+    };
     await textChannel.send(
-      `A new Injekta version is available: **v${latest}** (running v${LOCAL_VERSION}). Update with \`git pull && bun install\` and restart the bot.`,
+      `A new commit is available on origin: **${shortSha(status.remote)}** (running **${shortSha(
+        status.local,
+      )}**). Update with \`git pull && bun install\` and restart the bot.`,
     );
-    logger.info(`Posted version update notice to channel ${channelId}`);
+    logger.info(`Posted git update notice to channel ${channelId}`);
   } catch (error) {
     logger.warn('Failed to send version update notification', { channelId, error });
   }
+}
+
+export async function notifyIfOutdated(client: Client, opts?: { force?: boolean }) {
+  const status = getUpdateStatus();
+
+  if (!opts?.force && !autoNotifyEnabled) {
+    logger.info('Skipping version check: auto notifications disabled.');
+    return;
+  }
+
+  if (status.state !== 'behind') {
+    if (opts?.force) {
+      logger.info(
+        status.state === 'up_to_date'
+          ? `Running latest commit (${shortSha(status.local)}).`
+          : 'Skipping version check: unable to resolve git HEAD.',
+      );
+    }
+    return;
+  }
+
+  // Avoid spamming the same commit repeatedly during periodic checks
+  if (!opts?.force && lastNotifiedRemote === status.remote) {
+    logger.info('Skipping version alert: already notified for this remote commit.');
+    return;
+  }
+
+  const channelId = config.versionNotifyChannelId;
+  if (!channelId) {
+    logger.warn('No channel configured for version notifications.');
+    return;
+  }
+
+  await sendUpdateNotice(client, status, channelId);
+  lastNotifiedRemote = status.remote;
 }
