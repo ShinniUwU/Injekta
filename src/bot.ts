@@ -19,6 +19,8 @@ import { handleSetHormoneTestCommand } from './handlers/setHormoneTestCommand';
 import { handleHelpCommand } from './handlers/helpCommand';
 import { handleSetupCheckCommand } from './handlers/setupCheckCommand';
 import { handleUpdateCheckCommand } from './handlers/updateCheckCommand';
+import { handleTimeCheckCommand } from './handlers/timeCheckCommand';
+import { handleHealthCommand } from './handlers/healthCommand';
 import { notifyIfOutdated } from './versionCheck';
 
 const client = new Client({
@@ -43,6 +45,8 @@ client.once('ready', async () => {
     logger.info('Attempting to initialize scheduler...');
     await initializeScheduler(client);
     void notifyIfOutdated(client);
+    // Periodic git update check every 6 hours
+    setInterval(() => void notifyIfOutdated(client), 6 * 60 * 60 * 1000);
     // Check if scheduler started correctly now
     // logger.info('Scheduler initialization process completed.');
   } catch (error) {
@@ -95,6 +99,12 @@ client.on('interactionCreate', async (interaction) => {
         break;
       case 'updatecheck':
         await handleUpdateCheckCommand(interaction, client);
+        break;
+      case 'timecheck':
+        await handleTimeCheckCommand(interaction);
+        break;
+      case 'health':
+        await handleHealthCommand(interaction);
         break;
       default:
         await interaction.reply({

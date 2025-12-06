@@ -24,17 +24,44 @@ let reminderTimeout: NodeJS.Timeout | null = null;
 let testReminderTimeout: NodeJS.Timeout | null = null;
 let currentClient: Client | null = null;
 let currentSettings: GlobalSettings | null = null;
+let nextPromptTarget: DateTime | null = null;
+let nextReminderTarget: DateTime | null = null;
+
+async function fetchChannelWithRetry(
+  client: Client,
+  channelId: string,
+  retries = 2,
+  delayMs = 1000,
+): Promise<TextChannel | null> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const channel = (await client.channels.fetch(channelId)) as TextChannel | null;
+      if (channel) return channel;
+    } catch (err) {
+      logger.warn(
+        `Failed to fetch channel ${channelId} (attempt ${attempt + 1}/${retries + 1})`,
+        err,
+      );
+      if (attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  return null;
+}
 
 // Renamed internal function slightly to avoid potential conflict with export name if any
 function clearScheduled() {
   if (promptTimeout) {
     clearTimeout(promptTimeout);
     promptTimeout = null;
+    nextPromptTarget = null;
     logger.info('Cleared existing prompt timeout.');
   }
   if (reminderTimeout) {
     clearTimeout(reminderTimeout);
     reminderTimeout = null;
+    nextReminderTarget = null;
     logger.info('Cleared existing reminder timeout.');
   }
   if (testReminderTimeout) {
@@ -141,13 +168,7 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
   const previousInjection = nextInjectionDate.minus({ days: intervalDaysNum });
   if (!lastRun || (previousInjection.isValid && lastRun < previousInjection)) {
     try {
-      const channel = (await client.channels.fetch(channelId).catch((err) => {
-        logger.error(
-          `Failed to fetch channel ${channelId} for catch-up prompt:`,
-          err,
-        );
-        return null;
-      })) as TextChannel | null;
+      const channel = await fetchChannelWithRetry(client, channelId, 2, 1500);
       if (channel) {
         const medLabel =
           settings.medication || settings.medication === ''
@@ -209,10 +230,7 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
     }
 
     try {
-      const channel = (await client.channels.fetch(channelId).catch((err) => {
-        logger.error(`Failed to fetch channel ${channelId} for prompt:`, err);
-        return null;
-      })) as TextChannel | null;
+      const channel = await fetchChannelWithRetry(client, channelId, 2, 1500);
 
       if (!channel) {
         logger.error(
@@ -266,10 +284,7 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
     }
 
     try {
-      const channel = (await client.channels.fetch(channelId).catch((err) => {
-        logger.error(`Failed to fetch channel ${channelId} for reminder:`, err);
-        return null;
-      })) as TextChannel | null;
+      const channel = await fetchChannelWithRetry(client, channelId, 2, 1500);
 
       if (!channel) {
         logger.error(
@@ -311,6 +326,7 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
   );
 
   promptTimeout = scheduleTimeout(nextInjectionDate, sendPrompt, 'prompt');
+  nextPromptTarget = nextInjectionDate;
 
   const reminderDateTime = nextInjectionDate.minus({ hours: 1 });
   if (reminderDateTime > DateTime.now().setZone(timezone)) {
@@ -319,6 +335,7 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
       sendReminder,
       'reminder',
     );
+    nextReminderTarget = reminderDateTime;
     logger.info(
       `Scheduling reminder at ${reminderDateTime.toISO()} (${timezone}).`,
     );
@@ -329,13 +346,7 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
   // --- Hormone test reminder (E/T labs) ---
   const sendTestReminder = async () => {
     try {
-      const channel = (await client.channels.fetch(channelId).catch((err) => {
-        logger.error(
-          `Failed to fetch channel ${channelId} for hormone test reminder:`,
-          err,
-        );
-        return null;
-      })) as TextChannel | null;
+      const channel = await fetchChannelWithRetry(client, channelId, 2, 1500);
 
       if (!channel) {
         logger.error(
@@ -429,6 +440,17 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
 
   scheduleTestReminder();
 } // Closing brace for internalScheduleJobs
+
+export function getSchedulerStatus() {
+  return {
+    initialized: Boolean(currentSettings),
+    promptScheduled: Boolean(promptTimeout),
+    reminderScheduled: Boolean(reminderTimeout),
+    nextPromptISO: nextPromptTarget?.toISO() ?? null,
+    nextReminderISO: nextReminderTarget?.toISO() ?? null,
+    timezone: currentSettings?.timezone ?? null,
+  };
+}
 
 // EXPORTED function called initially and when settings change
 export async function initializeScheduler(client: Client) {
