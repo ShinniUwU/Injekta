@@ -14,8 +14,10 @@ export type UpdateStatus = {
 
 let autoNotifyEnabled = true;
 let lastNotifiedRemote: string | null = null;
+let warnedNoRepo = false;
+let warnedNoRemote = false;
 
-function runGit(command: string): string | null {
+function runGit(command: string, opts?: { silentOnError?: boolean }): string | null {
   try {
     return execSync(command, {
       encoding: 'utf-8',
@@ -24,9 +26,20 @@ function runGit(command: string): string | null {
       .toString()
       .trim();
   } catch (error) {
-    logger.warn(`Git command failed: ${command}`, { error });
+    if (!opts?.silentOnError) {
+      logger.warn(`Git command failed: ${command}`, { error });
+    }
     return null;
   }
+}
+
+function hasGitRepo(): boolean {
+  const res = runGit('git rev-parse --is-inside-work-tree', { silentOnError: true });
+  return res === 'true';
+}
+
+function hasRemote(remote = 'origin'): boolean {
+  return Boolean(runGit(`git remote get-url ${remote}`, { silentOnError: true }));
 }
 
 function getLocalHead(): string | null {
@@ -34,7 +47,7 @@ function getLocalHead(): string | null {
 }
 
 function getRemoteHead(remote = 'origin', ref = 'HEAD'): string | null {
-  const output = runGit(`git ls-remote ${remote} ${ref}`);
+  const output = runGit(`git ls-remote ${remote} ${ref}`, { silentOnError: true });
   if (!output) return null;
   const [sha] = output.split(/\s+/);
   return sha || null;
@@ -52,6 +65,22 @@ export function getVersionNotifyEnabled() {
 }
 
 export function getUpdateStatus(): UpdateStatus {
+  if (!hasGitRepo()) {
+    if (!warnedNoRepo) {
+      logger.info('Skipping update check: not a git repository.');
+      warnedNoRepo = true;
+    }
+    return { local: null, remote: null, state: 'unknown' };
+  }
+
+  if (!hasRemote()) {
+    if (!warnedNoRemote) {
+      logger.info('Skipping update check: no git remote named "origin" configured.');
+      warnedNoRemote = true;
+    }
+    return { local: null, remote: null, state: 'unknown' };
+  }
+
   const local = getLocalHead();
   const remote = getRemoteHead();
   if (!local || !remote) {
