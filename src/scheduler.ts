@@ -2,7 +2,11 @@
 import type { Client, TextChannel } from 'discord.js';
 import { EmbedBuilder } from 'discord.js';
 import type { GlobalSettings } from './database';
-import { getGlobalSettings, updateSchedulerRunTimes } from './database'; // Ensure this is correctly imported
+import {
+  getGlobalSettings,
+  updateSchedulerRunTimes,
+  getLastRecord,
+} from './database'; // Ensure this is correctly imported
 import logger from './logger';
 import { config } from './config';
 import {
@@ -169,6 +173,22 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
     }
   }
 
+  const getLatestInjectionDateTime = async (tz: string) => {
+    try {
+      const latest = await getLastRecord();
+      if (!latest) return null;
+      const source = latest.performed_at ?? latest.injection_date;
+      if (!source) return null;
+      const dt = DateTime.fromISO(String(source), { zone: tz });
+      if (dt.isValid) return dt;
+      const fallback = DateTime.fromJSDate(new Date(String(source))).setZone(tz);
+      return fallback.isValid ? fallback : null;
+    } catch (err) {
+      logger.error('Failed to fetch latest injection before sending reminder/prompt', err);
+      return null;
+    }
+  };
+
   const scheduleNext = async () => {
     await internalScheduleJobs(client, currentSettings as GlobalSettings);
   };
@@ -177,6 +197,17 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
     logger.info(
       `Injection prompt triggered for ${nextInjectionDate.toISO()} (${timezone}).`,
     );
+
+    const latestInjection = await getLatestInjectionDateTime(timezone);
+    if (latestInjection && latestInjection >= previousInjection) {
+      logger.info(
+        `Skipping prompt; latest injection at ${latestInjection.toISO()} already logged for this interval.`,
+      );
+      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
+      await scheduleNext();
+      return;
+    }
+
     try {
       const channel = (await client.channels.fetch(channelId).catch((err) => {
         logger.error(`Failed to fetch channel ${channelId} for prompt:`, err);
@@ -223,6 +254,17 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
 
   const sendReminder = async () => {
     logger.info(`Injection reminder triggered for 1 hour before schedule.`);
+
+    const latestInjection = await getLatestInjectionDateTime(timezone);
+    if (latestInjection && latestInjection >= previousInjection) {
+      logger.info(
+        `Skipping reminder; latest injection at ${latestInjection.toISO()} already logged for this interval.`,
+      );
+      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
+      await scheduleNext();
+      return;
+    }
+
     try {
       const channel = (await client.channels.fetch(channelId).catch((err) => {
         logger.error(`Failed to fetch channel ${channelId} for reminder:`, err);
