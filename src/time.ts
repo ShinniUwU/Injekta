@@ -171,3 +171,26 @@ export function formatTimestampForDisplay(
     .setLocale(locale || 'en-US')
     .toLocaleString(DateTime.DATETIME_FULL);
 }
+
+export function parseUserDateTimeInput(
+  value: string,
+  timezone: string,
+  now: DateTime = DateTime.now(),
+): Date {
+  const tz = isValidTimeZone(timezone) ? timezone : 'UTC';
+  const attempts = [
+    DateTime.fromISO(value, { zone: tz }),
+    DateTime.fromFormat(value, 'yyyy-MM-dd HH:mm', { zone: tz }),
+    DateTime.fromFormat(value, 'yyyy-MM-dd', { zone: tz }).set({
+      hour: now.setZone(tz).hour,
+      minute: now.setZone(tz).minute,
+    }),
+    DateTime.fromFormat(value, 'MM/dd/yyyy HH:mm', { zone: tz }),
+    DateTime.fromFormat(value, 'MM/dd/yyyy', { zone: tz }).set({
+      hour: now.setZone(tz).hour,
+      minute: now.setZone(tz).minute,
+    }),
+  ];
+  const found = attempts.find((dt) => dt.isValid);
+  return (found ?? DateTime.fromJSDate(new Date())).toJSDate();
+}

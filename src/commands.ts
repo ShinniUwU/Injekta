@@ -283,6 +283,15 @@ export async function refreshCommands(
       .setDescription('Get a simple, friendly walkthrough for using Injekta.')
       .toJSON(),
     new SlashCommandBuilder()
+      .setName('timecheck')
+      .setDescription('Show the bot/server time and configured timezone.')
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('health')
+      .setDescription('Admin: Check database connectivity and scheduler status.')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .toJSON(),
+    new SlashCommandBuilder()
       .setName('updatecheck')
       .setDescription('Check for git updates or configure update alerts.')
       .addSubcommand((sub) =>

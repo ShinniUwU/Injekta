@@ -16,6 +16,7 @@ import {
 import { createInjectionRecord, getGlobalSettings } from '../database';
 import { config } from '../config';
 import logger from '../logger';
+import { parseUserDateTimeInput } from '../time';
 
 export async function handleInjectionCommand(
   interaction: CommandInteraction,
@@ -125,10 +126,14 @@ export async function handleInjectionCommand(
       await buttonInteraction.deferUpdate();
       logger.info(`Injection confirmed by ${interaction.user.tag} via button.`);
       const defaults = await getGlobalSettings();
+      const tz = defaults?.timezone ?? 'UTC';
+      const performedAtDate = performedAt
+        ? parseUserDateTimeInput(performedAt, tz)
+        : null;
       const record = await createInjectionRecord(interaction.user.id, {
         medication: medication ?? defaults?.medication ?? null,
         doseMg: doseMg ?? (defaults?.dose_mg ?? null),
-        performedAt,
+        performedAt: performedAtDate ?? undefined,
         rawUnits,
       });
 

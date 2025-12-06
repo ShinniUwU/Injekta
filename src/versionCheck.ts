@@ -1,5 +1,7 @@
 // src/versionCheck.ts
 import { execSync } from 'child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import type { TextBasedChannel } from 'discord.js';
 import { Client } from 'discord.js';
 import logger from './logger';
@@ -16,6 +18,10 @@ let autoNotifyEnabled = true;
 let lastNotifiedRemote: string | null = null;
 let warnedNoRepo = false;
 let warnedNoRemote = false;
+let stateLoaded = false;
+
+const STATE_DIR = join(process.cwd(), '.data');
+const STATE_FILE = join(STATE_DIR, 'update-check.json');
 
 function runGit(command: string, opts?: { silentOnError?: boolean }): string | null {
   try {
@@ -56,15 +62,56 @@ function getRemoteHead(remote = 'origin', ref = 'HEAD'): string | null {
 const shortSha = (sha: string | null) =>
   sha && sha.length >= 7 ? sha.slice(0, 7) : 'unknown';
 
+function loadState() {
+  if (stateLoaded) return;
+  stateLoaded = true;
+  try {
+    if (existsSync(STATE_FILE)) {
+      const raw = readFileSync(STATE_FILE, 'utf-8');
+      const parsed = JSON.parse(raw) as {
+        autoNotifyEnabled?: boolean;
+        lastNotifiedRemote?: string | null;
+      };
+      if (typeof parsed.autoNotifyEnabled === 'boolean') {
+        autoNotifyEnabled = parsed.autoNotifyEnabled;
+      }
+      if (typeof parsed.lastNotifiedRemote === 'string' || parsed.lastNotifiedRemote === null) {
+        lastNotifiedRemote = parsed.lastNotifiedRemote ?? null;
+      }
+    }
+  } catch (error) {
+    logger.warn('Failed to load update-check state; using defaults.', { error });
+  }
+}
+
+function persistState() {
+  try {
+    if (!existsSync(STATE_DIR)) {
+      mkdirSync(STATE_DIR, { recursive: true });
+    }
+    const payload = {
+      autoNotifyEnabled,
+      lastNotifiedRemote,
+    };
+    writeFileSync(STATE_FILE, JSON.stringify(payload, null, 2));
+  } catch (error) {
+    logger.warn('Failed to persist update-check state.', { error });
+  }
+}
+
 export function setVersionNotifyEnabled(enabled: boolean) {
+  loadState();
   autoNotifyEnabled = enabled;
+  persistState();
 }
 
 export function getVersionNotifyEnabled() {
+  loadState();
   return autoNotifyEnabled;
 }
 
 export function getUpdateStatus(): UpdateStatus {
+  loadState();
   if (!hasGitRepo()) {
     if (!warnedNoRepo) {
       logger.info('Skipping update check: not a git repository.');
@@ -158,4 +205,5 @@ export async function notifyIfOutdated(client: Client, opts?: { force?: boolean 
 
   await sendUpdateNotice(client, status, channelId);
   lastNotifiedRemote = status.remote;
+  persistState();
 }

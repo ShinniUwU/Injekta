@@ -3,6 +3,7 @@ import type { CommandInteraction } from 'discord.js';
 import { MessageFlags, PermissionFlagsBits } from 'discord.js';
 import { createInjectionRecord, getGlobalSettings, recordAdminAction } from '../database';
 import logger from '../logger';
+import { parseUserDateTimeInput } from '../time';
 
 export async function handleLogforCommand(interaction: CommandInteraction) {
   if (
@@ -68,10 +69,14 @@ export async function handleLogforCommand(interaction: CommandInteraction) {
 
   try {
     const defaults = await getGlobalSettings();
+    const tz = defaults?.timezone ?? 'UTC';
+    const performedAtDate = performedAt
+      ? parseUserDateTimeInput(performedAt, tz)
+      : null;
     const record = await createInjectionRecord(targetUser.id, {
       medication: medication ?? defaults?.medication ?? null,
       doseMg: doseMg ?? (defaults?.dose_mg ?? null),
-      performedAt,
+      performedAt: performedAtDate ?? undefined,
       rawUnits,
       adminUserId: interaction.user.id,
     });
