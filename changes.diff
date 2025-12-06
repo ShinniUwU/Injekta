@@ -1,87 +1,336 @@
-diff --git a/.gitignore b/.gitignore
-index f998198..c6bba59 100644
---- a/.gitignore
-+++ b/.gitignore
-@@ -128,6 +128,3 @@ dist
- .yarn/build-state.yml
- .yarn/install-state.gz
- .pnp.*
--*.diff
--site
--site/*
-diff --git a/src/scheduler.ts b/src/scheduler.ts
-index 4e0c2a4..8e62cc8 100644
---- a/src/scheduler.ts
-+++ b/src/scheduler.ts
-@@ -2,7 +2,11 @@
- import type { Client, TextChannel } from 'discord.js';
- import { EmbedBuilder } from 'discord.js';
- import type { GlobalSettings } from './database';
--import { getGlobalSettings, updateSchedulerRunTimes } from './database'; // Ensure this is correctly imported
-+import {
-+  getGlobalSettings,
-+  updateSchedulerRunTimes,
-+  getLastRecord,
-+} from './database'; // Ensure this is correctly imported
+diff --git a/changes.diff b/changes.diff
+index 0302b85..e69de29 100644
+--- a/changes.diff
++++ b/changes.diff
+@@ -1,87 +0,0 @@
+-diff --git a/.gitignore b/.gitignore
+-index f998198..c6bba59 100644
+---- a/.gitignore
+-+++ b/.gitignore
+-@@ -128,6 +128,3 @@ dist
+- .yarn/build-state.yml
+- .yarn/install-state.gz
+- .pnp.*
+--*.diff
+--site
+--site/*
+-diff --git a/src/scheduler.ts b/src/scheduler.ts
+-index 4e0c2a4..8e62cc8 100644
+---- a/src/scheduler.ts
+-+++ b/src/scheduler.ts
+-@@ -2,7 +2,11 @@
+- import type { Client, TextChannel } from 'discord.js';
+- import { EmbedBuilder } from 'discord.js';
+- import type { GlobalSettings } from './database';
+--import { getGlobalSettings, updateSchedulerRunTimes } from './database'; // Ensure this is correctly imported
+-+import {
+-+  getGlobalSettings,
+-+  updateSchedulerRunTimes,
+-+  getLastRecord,
+-+} from './database'; // Ensure this is correctly imported
+- import logger from './logger';
+- import { config } from './config';
+- import {
+-@@ -169,6 +173,22 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
+-     }
+-   }
+- 
+-+  const getLatestInjectionDateTime = async (tz: string) => {
+-+    try {
+-+      const latest = await getLastRecord();
+-+      if (!latest) return null;
+-+      const source = latest.performed_at ?? latest.injection_date;
+-+      if (!source) return null;
+-+      const dt = DateTime.fromISO(String(source), { zone: tz });
+-+      if (dt.isValid) return dt;
+-+      const fallback = DateTime.fromJSDate(new Date(String(source))).setZone(tz);
+-+      return fallback.isValid ? fallback : null;
+-+    } catch (err) {
+-+      logger.error('Failed to fetch latest injection before sending reminder/prompt', err);
+-+      return null;
+-+    }
+-+  };
+-+
+-   const scheduleNext = async () => {
+-     await internalScheduleJobs(client, currentSettings as GlobalSettings);
+-   };
+-@@ -177,6 +197,17 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
+-     logger.info(
+-       `Injection prompt triggered for ${nextInjectionDate.toISO()} (${timezone}).`,
+-     );
+-+
+-+    const latestInjection = await getLatestInjectionDateTime(timezone);
+-+    if (latestInjection && latestInjection >= previousInjection) {
+-+      logger.info(
+-+        `Skipping prompt; latest injection at ${latestInjection.toISO()} already logged for this interval.`,
+-+      );
+-+      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
+-+      await scheduleNext();
+-+      return;
+-+    }
+-+
+-     try {
+-       const channel = (await client.channels.fetch(channelId).catch((err) => {
+-         logger.error(`Failed to fetch channel ${channelId} for prompt:`, err);
+-@@ -223,6 +254,17 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
+- 
+-   const sendReminder = async () => {
+-     logger.info(`Injection reminder triggered for 1 hour before schedule.`);
+-+
+-+    const latestInjection = await getLatestInjectionDateTime(timezone);
+-+    if (latestInjection && latestInjection >= previousInjection) {
+-+      logger.info(
+-+        `Skipping reminder; latest injection at ${latestInjection.toISO()} already logged for this interval.`,
+-+      );
+-+      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
+-+      await scheduleNext();
+-+      return;
+-+    }
+-+
+-     try {
+-       const channel = (await client.channels.fetch(channelId).catch((err) => {
+-         logger.error(`Failed to fetch channel ${channelId} for reminder:`, err);
+diff --git a/src/bot.ts b/src/bot.ts
+index eee0cd1..a87e749 100644
+--- a/src/bot.ts
++++ b/src/bot.ts
+@@ -18,6 +18,7 @@ import { handleConvertUnitsCommand } from './handlers/convertUnitsCommand';
+ import { handleSetHormoneTestCommand } from './handlers/setHormoneTestCommand';
+ import { handleHelpCommand } from './handlers/helpCommand';
+ import { handleSetupCheckCommand } from './handlers/setupCheckCommand';
++import { handleUpdateCheckCommand } from './handlers/updateCheckCommand';
+ import { notifyIfOutdated } from './versionCheck';
+ 
+ const client = new Client({
+@@ -92,6 +93,9 @@ client.on('interactionCreate', async (interaction) => {
+       case 'setupcheck':
+         await handleSetupCheckCommand(interaction);
+         break;
++      case 'updatecheck':
++        await handleUpdateCheckCommand(interaction, client);
++        break;
+       default:
+         await interaction.reply({
+           content: 'Unknown command.',
+diff --git a/src/commands.ts b/src/commands.ts
+index df96632..59516c3 100644
+--- a/src/commands.ts
++++ b/src/commands.ts
+@@ -282,6 +282,30 @@ export async function refreshCommands(
+       .setName('help')
+       .setDescription('Get a simple, friendly walkthrough for using Injekta.')
+       .toJSON(),
++    new SlashCommandBuilder()
++      .setName('updatecheck')
++      .setDescription('Check for git updates or configure update alerts.')
++      .addSubcommand((sub) =>
++        sub
++          .setName('check')
++          .setDescription('Manually check if a newer commit exists on origin.'),
++      )
++      .addSubcommand((sub) =>
++        sub
++          .setName('notify')
++          .setDescription('Enable or disable automatic update alerts.')
++          .addStringOption((option) =>
++            option
++              .setName('mode')
++              .setDescription('Turn update alerts on or off.')
++              .setRequired(true)
++              .addChoices(
++                { name: 'on', value: 'on' },
++                { name: 'off', value: 'off' },
++              ),
++          ),
++      )
++      .toJSON(),
+   ];
+ 
+   const rest = new REST({ version: '10' }).setToken(botToken);
+diff --git a/src/versionCheck.ts b/src/versionCheck.ts
+index e211d4f..d57453f 100644
+--- a/src/versionCheck.ts
++++ b/src/versionCheck.ts
+@@ -1,74 +1,73 @@
+ // src/versionCheck.ts
+-import { readFileSync } from 'fs';
++import { execSync } from 'child_process';
+ import type { TextBasedChannel } from 'discord.js';
+ import { Client } from 'discord.js';
  import logger from './logger';
  import { config } from './config';
- import {
-@@ -169,6 +173,22 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
-     }
+ 
+-const LOCAL_VERSION = (() => {
+-  try {
+-    const pkgRaw = readFileSync(new URL('../package.json', import.meta.url), 'utf-8');
+-    const pkg = JSON.parse(pkgRaw);
+-    return pkg.version as string;
+-  } catch (error) {
+-    logger.warn('Could not read local version from package.json', { error });
+-    return '0.0.0';
+-  }
+-})();
+-
+-function compareSemver(current: string, latest: string): number {
+-  const cur = current.split('.').map((v) => parseInt(v, 10));
+-  const lat = latest.split('.').map((v) => parseInt(v, 10));
+-  for (let i = 0; i < 3; i += 1) {
+-    const a = cur[i] || 0;
+-    const b = lat[i] || 0;
+-    if (a > b) return 1;
+-    if (a < b) return -1;
+-  }
+-  return 0;
+-}
++export type UpdateState = 'unknown' | 'up_to_date' | 'behind';
++export type UpdateStatus = {
++  local: string | null;
++  remote: string | null;
++  state: UpdateState;
++};
++
++let autoNotifyEnabled = true;
++let lastNotifiedRemote: string | null = null;
+ 
+-async function fetchLatestVersion(): Promise<string | null> {
++function runGit(command: string): string | null {
+   try {
+-    const res = await fetch('https://registry.npmjs.org/injekta/latest', {
+-      method: 'GET',
+-      headers: { Accept: 'application/json' },
+-    });
+-    if (res.status === 404) {
+-      logger.info('Version check: package not published to npm; skipping check.');
+-      return null;
+-    }
+-    if (!res.ok) {
+-      logger.warn('Version check failed: npm registry responded with non-OK status', {
+-        status: res.status,
+-        statusText: res.statusText,
+-      });
+-      return null;
+-    }
+-    const data = (await res.json()) as { version?: string };
+-    return data.version ?? null;
++    return execSync(command, {
++      encoding: 'utf-8',
++      stdio: ['ignore', 'pipe', 'pipe'],
++    })
++      .toString()
++      .trim();
+   } catch (error) {
+-    logger.warn('Failed to check latest version from npm', { error });
++    logger.warn(`Git command failed: ${command}`, { error });
+     return null;
    }
+ }
  
-+  const getLatestInjectionDateTime = async (tz: string) => {
-+    try {
-+      const latest = await getLastRecord();
-+      if (!latest) return null;
-+      const source = latest.performed_at ?? latest.injection_date;
-+      if (!source) return null;
-+      const dt = DateTime.fromISO(String(source), { zone: tz });
-+      if (dt.isValid) return dt;
-+      const fallback = DateTime.fromJSDate(new Date(String(source))).setZone(tz);
-+      return fallback.isValid ? fallback : null;
-+    } catch (err) {
-+      logger.error('Failed to fetch latest injection before sending reminder/prompt', err);
-+      return null;
-+    }
-+  };
+-export async function notifyIfOutdated(client: Client) {
+-  const latest = await fetchLatestVersion();
+-  if (!latest) return;
++function getLocalHead(): string | null {
++  return runGit('git rev-parse HEAD');
++}
+ 
+-  const comparison = compareSemver(LOCAL_VERSION, latest);
+-  if (comparison >= 0) {
+-    logger.info(`Running latest Injekta version (${LOCAL_VERSION}).`);
+-    return;
+-  }
++function getRemoteHead(remote = 'origin', ref = 'HEAD'): string | null {
++  const output = runGit(`git ls-remote ${remote} ${ref}`);
++  if (!output) return null;
++  const [sha] = output.split(/\s+/);
++  return sha || null;
++}
+ 
+-  const channelId = config.versionNotifyChannelId;
+-  if (!channelId) {
+-    logger.warn('No channel configured for version notifications.');
+-    return;
++const shortSha = (sha: string | null) =>
++  sha && sha.length >= 7 ? sha.slice(0, 7) : 'unknown';
 +
-   const scheduleNext = async () => {
-     await internalScheduleJobs(client, currentSettings as GlobalSettings);
-   };
-@@ -177,6 +197,17 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
-     logger.info(
-       `Injection prompt triggered for ${nextInjectionDate.toISO()} (${timezone}).`,
++export function setVersionNotifyEnabled(enabled: boolean) {
++  autoNotifyEnabled = enabled;
++}
++
++export function getVersionNotifyEnabled() {
++  return autoNotifyEnabled;
++}
++
++export function getUpdateStatus(): UpdateStatus {
++  const local = getLocalHead();
++  const remote = getRemoteHead();
++  if (!local || !remote) {
++    return { local, remote, state: 'unknown' };
+   }
++  if (local === remote) {
++    return { local, remote, state: 'up_to_date' };
++  }
++  return { local, remote, state: 'behind' };
++}
+ 
++async function sendUpdateNotice(
++  client: Client,
++  status: UpdateStatus,
++  channelId: string,
++) {
+   try {
+     const channel = await client.channels.fetch(channelId);
+     if (!channel || !channel.isTextBased()) {
+@@ -83,12 +82,51 @@ export async function notifyIfOutdated(client: Client) {
+       return;
+     }
+ 
+-    const textChannel = channel as TextBasedChannel & { send: (content: string) => Promise<unknown> };
++    const textChannel = channel as TextBasedChannel & {
++      send: (content: string) => Promise<unknown>;
++    };
+     await textChannel.send(
+-      `A new Injekta version is available: **v${latest}** (running v${LOCAL_VERSION}). Update with \`git pull && bun install\` and restart the bot.`,
++      `A new commit is available on origin: **${shortSha(status.remote)}** (running **${shortSha(
++        status.local,
++      )}**). Update with \`git pull && bun install\` and restart the bot.`,
      );
+-    logger.info(`Posted version update notice to channel ${channelId}`);
++    logger.info(`Posted git update notice to channel ${channelId}`);
+   } catch (error) {
+     logger.warn('Failed to send version update notification', { channelId, error });
+   }
+ }
 +
-+    const latestInjection = await getLatestInjectionDateTime(timezone);
-+    if (latestInjection && latestInjection >= previousInjection) {
++export async function notifyIfOutdated(client: Client, opts?: { force?: boolean }) {
++  const status = getUpdateStatus();
++
++  if (!opts?.force && !autoNotifyEnabled) {
++    logger.info('Skipping version check: auto notifications disabled.');
++    return;
++  }
++
++  if (status.state !== 'behind') {
++    if (opts?.force) {
 +      logger.info(
-+        `Skipping prompt; latest injection at ${latestInjection.toISO()} already logged for this interval.`,
++        status.state === 'up_to_date'
++          ? `Running latest commit (${shortSha(status.local)}).`
++          : 'Skipping version check: unable to resolve git HEAD.',
 +      );
-+      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
-+      await scheduleNext();
-+      return;
 +    }
++    return;
++  }
 +
-     try {
-       const channel = (await client.channels.fetch(channelId).catch((err) => {
-         logger.error(`Failed to fetch channel ${channelId} for prompt:`, err);
-@@ -223,6 +254,17 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
- 
-   const sendReminder = async () => {
-     logger.info(`Injection reminder triggered for 1 hour before schedule.`);
++  // Avoid spamming the same commit repeatedly during periodic checks
++  if (!opts?.force && lastNotifiedRemote === status.remote) {
++    logger.info('Skipping version alert: already notified for this remote commit.');
++    return;
++  }
 +
-+    const latestInjection = await getLatestInjectionDateTime(timezone);
-+    if (latestInjection && latestInjection >= previousInjection) {
-+      logger.info(
-+        `Skipping reminder; latest injection at ${latestInjection.toISO()} already logged for this interval.`,
-+      );
-+      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
-+      await scheduleNext();
-+      return;
-+    }
++  const channelId = config.versionNotifyChannelId;
++  if (!channelId) {
++    logger.warn('No channel configured for version notifications.');
++    return;
++  }
 +
-     try {
-       const channel = (await client.channels.fetch(channelId).catch((err) => {
-         logger.error(`Failed to fetch channel ${channelId} for reminder:`, err);
++  await sendUpdateNotice(client, status, channelId);
++  lastNotifiedRemote = status.remote;
++}

@@ -18,6 +18,7 @@ import { handleConvertUnitsCommand } from './handlers/convertUnitsCommand';
 import { handleSetHormoneTestCommand } from './handlers/setHormoneTestCommand';
 import { handleHelpCommand } from './handlers/helpCommand';
 import { handleSetupCheckCommand } from './handlers/setupCheckCommand';
+import { handleUpdateCheckCommand } from './handlers/updateCheckCommand';
 import { notifyIfOutdated } from './versionCheck';
 
 const client = new Client({
@@ -91,6 +92,9 @@ client.on('interactionCreate', async (interaction) => {
         break;
       case 'setupcheck':
         await handleSetupCheckCommand(interaction);
+        break;
+      case 'updatecheck':
+        await handleUpdateCheckCommand(interaction, client);
         break;
       default:
         await interaction.reply({
