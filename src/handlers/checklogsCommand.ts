@@ -57,8 +57,20 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
     return;
   }
 
+  const sortedRecords = [...records].sort((a, b) => {
+    const parsedA = Date.parse(a.performed_at ?? a.injection_date);
+    const parsedB = Date.parse(b.performed_at ?? b.injection_date);
+    const aTime = Number.isNaN(parsedA) ? 0 : parsedA;
+    const bTime = Number.isNaN(parsedB) ? 0 : parsedB;
+    if (aTime !== bTime) return bTime - aTime; // Newest first
+    return b.id - a.id; // Tie-breaker: higher IDs first
+  });
+
   const logsEmbed = new EmbedBuilder()
     .setTitle(`${userToCheck.username}'s Last 5 Injection Logs`)
+    .setDescription(
+      'Newest to oldest. Use `/deletemylog log_id:<ID>` to remove a specific entry.',
+    )
     .setColor(0x3498db)
     .setThumbnail(
       userToCheck.displayAvatarURL() ??
@@ -66,22 +78,23 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
     )
     .setTimestamp();
 
-  const fields = records.map((record) => {
-    const med = record.medication ? `\nMedication: ${record.medication}` : '';
+  const fields = sortedRecords.map((record, index) => {
+    const med = record.medication ? `\n• Medication: ${record.medication}` : '';
     const dose =
       record.dose_mg !== null && record.dose_mg !== undefined
-        ? `\nDose: ${record.dose_mg} mg`
+        ? `\n• Dose: ${record.dose_mg} mg`
         : '';
     const units =
       record.raw_units !== null && record.raw_units !== undefined
-        ? `\nUnits: ${record.raw_units}`
+        ? `\n• Units: ${record.raw_units}`
         : '';
+    const headerDate =
+      formatTimestampForDisplay(
+        record.performed_at ?? record.injection_date,
+        interaction.locale ?? 'en-US',
+      ) || 'Unknown Date';
     return {
-      name:
-        formatTimestampForDisplay(
-          record.performed_at ?? record.injection_date,
-          interaction.locale ?? 'en-US',
-        ) || 'Unknown Date',
+      name: `${index + 1}. #${record.id} • ${headerDate}`,
       value: `${record.leg === 'Right' ? '✅ Right leg' : '❌ Left leg'}${med}${dose}${units}`,
       inline: false,
     };
