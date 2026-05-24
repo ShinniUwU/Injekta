@@ -25,12 +25,14 @@ const PROJECT_ROOT = resolve(import.meta.dir, '..');
 const STATE_DIR = join(PROJECT_ROOT, '.data');
 const STATE_FILE = join(STATE_DIR, 'update-check.json');
 
-function runGit(command: string, opts?: { silentOnError?: boolean }): string | null {
+function runGit(command: string, opts?: { silentOnError?: boolean; timeoutMs?: number }): string | null {
   try {
     return execSync(command, {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: PROJECT_ROOT,
+      timeout: opts?.timeoutMs,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     })
       .toString()
       .trim();
@@ -56,7 +58,7 @@ function getLocalHead(): string | null {
 }
 
 function getRemoteHead(remote = 'origin', ref = 'HEAD'): string | null {
-  const output = runGit(`git ls-remote ${remote} ${ref}`, { silentOnError: true });
+  const output = runGit(`git ls-remote ${remote} ${ref}`, { timeoutMs: 10000 });
   if (!output) return null;
   const [sha] = output.split(/\s+/);
   return sha || null;
@@ -116,7 +118,7 @@ export function getUpdateStatus(): UpdateStatus {
   loadState();
   if (!hasGitRepo()) {
     if (!warnedNoRepo) {
-      logger.info('Skipping update check: not a git repository.');
+      logger.warn(`Update check: no git repo found at ${PROJECT_ROOT}`);
       warnedNoRepo = true;
     }
     return { local: null, remote: null, state: 'unknown' };
@@ -124,16 +126,22 @@ export function getUpdateStatus(): UpdateStatus {
 
   if (!hasRemote()) {
     if (!warnedNoRemote) {
-      logger.info('Skipping update check: no git remote named "origin" configured.');
+      logger.warn('Update check: no git remote "origin" configured.');
       warnedNoRemote = true;
     }
     return { local: null, remote: null, state: 'unknown' };
   }
 
   const local = getLocalHead();
+  if (!local) {
+    logger.warn('Update check: could not resolve local HEAD (git rev-parse HEAD failed).');
+    return { local: null, remote: null, state: 'unknown' };
+  }
+
   const remote = getRemoteHead();
-  if (!local || !remote) {
-    return { local, remote, state: 'unknown' };
+  if (!remote) {
+    logger.warn('Update check: could not resolve remote HEAD (git ls-remote failed).');
+    return { local, remote: null, state: 'unknown' };
   }
   if (local === remote) {
     return { local, remote, state: 'up_to_date' };
