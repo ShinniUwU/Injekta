@@ -82,8 +82,23 @@ function getLocalHead(): string | null {
   }
 }
 
+function getRemoteUrl(remote = 'origin'): string | null {
+  try {
+    const cfg = readFileSync(join(PROJECT_ROOT, '.git', 'config'), 'utf-8');
+    const match = cfg.match(new RegExp(`\\[remote "${remote}"\\][\\s\\S]*?url\\s*=\\s*(.+)`));
+    return match?.[1]?.trim() ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function getRemoteHead(remote = 'origin', ref = 'HEAD'): string | null {
-  const output = runGit(`git ls-remote ${remote} ${ref}`, { timeoutMs: 10000 });
+  const url = getRemoteUrl(remote);
+  if (!url) {
+    logger.warn(`Update check: could not read URL for remote "${remote}" from git config.`);
+    return null;
+  }
+  const output = runGit(`git ls-remote "${url}" ${ref}`, { timeoutMs: 10000 });
   if (!output) return null;
   const [sha] = output.split(/\s+/);
   return sha || null;
