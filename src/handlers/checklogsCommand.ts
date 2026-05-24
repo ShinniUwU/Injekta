@@ -41,19 +41,10 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
 
   const records: InjectionRecord[] = await getRecentLogs(userIdToCheck, 5);
 
-  if (!records || records.length === 0) {
-    if (records === null) {
-      logger.error('Error fetching logs for checklogs command', {
-        userId: userIdToCheck,
-      });
-      await interaction.editReply(
-        `Error retrieving logs for ${userToCheck.username}.`,
-      );
-    } else {
-      await interaction.editReply(
-        `No injection logs yet for ${userToCheck.username}. Run /injection in the designated channel when you are ready to start tracking.`,
-      );
-    }
+  if (records.length === 0) {
+    await interaction.editReply(
+      `No injection logs yet for ${userToCheck.username}. Run /injection in the designated channel when you are ready to start tracking.`,
+    );
     return;
   }
 

@@ -1,7 +1,6 @@
 // src/handlers/deleteMyLogCommand.ts
 import type {
   CommandInteraction,
-  MessageComponentInteraction,
   Message,
 } from 'discord.js';
 import {
@@ -11,8 +10,9 @@ import {
   EmbedBuilder,
   type InteractionEditReplyOptions,
   MessageFlags,
-} from 'discord.js'; // Keep type import
+} from 'discord.js';
 import { deleteLogById, deleteLatestLogForUser } from '../database';
+import { awaitConfirmation } from '../utils/awaitConfirm';
 import logger from '../logger';
 import { formatTimestampForDisplay } from '../time';
 
@@ -86,114 +86,77 @@ export async function handleDeleteMyLogCommand(
 
   const replyMessage = (await interaction.fetchReply()) as Message;
 
-  const filter = (i: MessageComponentInteraction) =>
-    (i.customId === confirmCustomId || i.customId === cancelCustomId) &&
-    i.user.id === interaction.user.id;
+  const timeoutEmbed = new EmbedBuilder(confirmationEmbed.toJSON())
+    .setDescription('Confirmation timed out or failed. Log entry not deleted.')
+    .setColor(0x95a5a6);
 
-  try {
-    const buttonInteraction = await replyMessage.awaitMessageComponent({
-      filter,
-      time: 60000, // 60 seconds timeout
-    });
+  const confirmed = await awaitConfirmation({
+    interaction,
+    replyMessage,
+    confirmId: confirmCustomId,
+    cancelId: cancelCustomId,
+    confirmButton,
+    cancelButton,
+    timeoutEmbed,
+  });
 
-    if (!buttonInteraction) {
-      throw new Error('Confirmation timed out.');
+  if (confirmed === 'timeout') return;
+
+  let replyOptions: InteractionEditReplyOptions = {};
+
+  if (confirmed === 'confirmed') {
+    logger.info(`${interaction.user.tag} confirmed deletion for ${targetLogDesc}.`);
+
+    let result: { success: boolean; deletedRecord?: any } = { success: false };
+    if (operationType === 'specific' && logIdToDelete) {
+      result = await deleteLogById(logIdToDelete, interaction.user.id);
+    } else if (operationType === 'latest') {
+      result = await deleteLatestLogForUser(interaction.user.id);
     }
 
-    await buttonInteraction.deferUpdate();
-
-    let replyOptions: InteractionEditReplyOptions = {};
-    let result: { success: boolean; deletedRecord?: any } = { success: false };
-
-    if (buttonInteraction.customId === confirmCustomId) {
-      logger.info(
-        `${interaction.user.tag} confirmed deletion for ${targetLogDesc}.`,
-      );
-
-      if (operationType === 'specific' && logIdToDelete) {
-        result = await deleteLogById(logIdToDelete, interaction.user.id); // Verify ownership
-      } else if (operationType === 'latest') {
-        result = await deleteLatestLogForUser(interaction.user.id);
-      }
-
-      if (result.success && result.deletedRecord) {
-        const deletedInfo = result.deletedRecord;
-        const medLabel = deletedInfo.medication
-          ? ` | Medication: ${deletedInfo.medication}`
+    if (result.success && result.deletedRecord) {
+      const deletedInfo = result.deletedRecord;
+      const medLabel = deletedInfo.medication ? ` | Medication: ${deletedInfo.medication}` : '';
+      const doseLabel =
+        deletedInfo.dose_mg !== null && deletedInfo.dose_mg !== undefined
+          ? ` | Dose: ${deletedInfo.dose_mg} mg`
           : '';
-        const doseLabel =
-          deletedInfo.dose_mg !== null && deletedInfo.dose_mg !== undefined
-            ? ` | Dose: ${deletedInfo.dose_mg} mg`
-            : '';
-        const unitLabel =
-          deletedInfo.raw_units !== null && deletedInfo.raw_units !== undefined
-            ? ` | Units: ${deletedInfo.raw_units}`
-            : '';
-        replyOptions = {
-          content: `Successfully deleted log entry #${deletedInfo.id} (${deletedInfo.leg} leg on ${formatTimestampForDisplay(deletedInfo.performed_at ?? deletedInfo.injection_date, interaction.locale ?? 'en-US')}${medLabel}${doseLabel}${unitLabel}).`,
-          embeds: [],
-          components: [],
-        };
-      } else if (
-        result.success &&
-        !result.deletedRecord &&
-        operationType === 'latest'
-      ) {
-        replyOptions = {
-          content: `Successfully deleted your latest log entry.`,
-          embeds: [],
-          components: [],
-        };
-      } else if (!result.success && operationType === 'specific') {
-        replyOptions = {
-          content: `Failed to delete log entry #${logIdToDelete}. It might not exist or doesn't belong to you.`,
-          embeds: [],
-          components: [],
-        };
-      } else {
-        replyOptions = {
-          content: `Failed to delete the log entry. No log might exist or an error occurred.`,
-          embeds: [],
-          components: [],
-        };
-      }
-    } else if (buttonInteraction.customId === cancelCustomId) {
-      logger.info(
-        `${interaction.user.tag} cancelled deletion for ${targetLogDesc}.`,
-      );
+      const unitLabel =
+        deletedInfo.raw_units !== null && deletedInfo.raw_units !== undefined
+          ? ` | Units: ${deletedInfo.raw_units}`
+          : '';
       replyOptions = {
-        content: 'Deletion cancelled.',
+        content: `Successfully deleted log entry #${deletedInfo.id} (${deletedInfo.leg} leg on ${formatTimestampForDisplay(deletedInfo.performed_at ?? deletedInfo.injection_date, interaction.locale ?? 'en-US')}${medLabel}${doseLabel}${unitLabel}).`,
+        embeds: [],
+        components: [],
+      };
+    } else if (result.success && !result.deletedRecord && operationType === 'latest') {
+      replyOptions = {
+        content: 'Successfully deleted your latest log entry.',
+        embeds: [],
+        components: [],
+      };
+    } else if (!result.success && operationType === 'specific') {
+      replyOptions = {
+        content: `Failed to delete log entry #${logIdToDelete}. It might not exist or doesn't belong to you.`,
+        embeds: [],
+        components: [],
+      };
+    } else {
+      replyOptions = {
+        content: 'Failed to delete the log entry. No log might exist or an error occurred.',
         embeds: [],
         components: [],
       };
     }
-
-    await interaction.editReply(replyOptions);
-  } catch (error) {
-    logger.warn(
-      `Confirmation timed out or error during deleteMyLog for ${interaction.user.tag}:`,
-      error instanceof Error ? error.message : error,
-    );
-    const timedOutEmbed = new EmbedBuilder(confirmationEmbed.toJSON())
-      .setDescription(
-        'Confirmation timed out or failed. Log entry not deleted.',
-      )
-      .setColor(0x95a5a6);
-
-    confirmButton.setDisabled(true);
-    cancelButton.setDisabled(true);
-    const disabledRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      confirmButton,
-      cancelButton,
-    );
-
-    await interaction
-      .editReply({ embeds: [timedOutEmbed], components: [disabledRow] })
-      .catch((editError) =>
-        logger.error(
-          'Failed to edit reply after deleteMyLog timeout/error:',
-          editError,
-        ),
-      );
+  } else {
+    logger.info(`${interaction.user.tag} cancelled deletion for ${targetLogDesc}.`);
+    replyOptions = {
+      content: 'Deletion cancelled.',
+      embeds: [],
+      components: [],
+    };
   }
+
+  await interaction.editReply(replyOptions);
 }

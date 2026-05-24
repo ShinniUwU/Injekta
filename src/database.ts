@@ -40,6 +40,9 @@ let pool: Pool;
 try {
   pool = new Pool({
     connectionString: config.databaseUrl,
+    statement_timeout: 10000,
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 30000,
   });
   pool.on('error', (err, client) => {
     logger.error('Unexpected error on idle PostgreSQL client', {
@@ -196,12 +199,6 @@ export async function createInjectionRecord(
 > {
   try {
     const lastRecord = await getLastRecord(userId);
-    if (lastRecord === null && !userId) {
-      logger.warn(
-        'createInjectionRecord cannot proceed because getLastRecord failed or returned null unexpectedly.',
-      );
-    }
-
     const nextLeg = getNextLeg(lastRecord?.leg);
     const parsedDose =
       options?.doseMg === null || options?.doseMg === undefined

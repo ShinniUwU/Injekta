@@ -1,33 +1,23 @@
 # Injekta
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-**Injekta** is a Discord bot built with TypeScript designed to help manage and track Hormone Replacement Therapy (HRT) injections. It logs injection data (alternating between 'Right' and 'Left' legs), tracks medication and dose, supports flexible cadences (e.g., every 3.5 days, 10 days, or monthly), automatically keeps only the last 5 records per user, and sends reminders—all integrated with a **self-hosted PostgreSQL database** for persistent data storage.
+
+**Injekta** is a self-hosted Discord bot for tracking HRT injections. It alternates legs automatically, tracks medication and dose, supports flexible schedules (e.g. every 3.5, 7, 10, or 30 days), keeps your last 5 logs per user, and fires reminders — all backed by a PostgreSQL database.
 
 ## Features
 
-- **Simple Logging:** Log injections easily using the `/injection` command with button confirmation; optionally record medication name and dose (mg).
-- **Automatic Leg Alternation:** The bot automatically determines whether the 'Right' or 'Left' leg is next based on your previous log.
-- **Log History:** View your last 5 injection logs using `/checklogs` (now includes medication and dose). Older logs are automatically removed.
-- **Stats Tracking:** Check your total logged injections and current weekly streak with `/stats`.
-- **Scheduling & Reminders:**
-  - Set a global injection schedule (day, time, timezone, interval) using `/setinjectionschedule` (Admin-only) with non-weekly cadences like every 3.5 days or every 10/30 days.
-  * Receive automatic reminders 1 hour before the scheduled time in a designated channel, including medication name and dose.
-  * Receive a prompt in the designated channel when it's time to log your injection.
-- **Hormone Test Reminders:** Set monthly (or custom interval) E/T lab reminders starting from a chosen date using `/sethormonetest`.
-- **Dosing Helpers:** Convert syringe units to mg with `/convertunits` (requires vial concentration).
-- **Log Deletion:**
-    - Users can delete their own latest log (or a specific one by ID) using `/deletemylog` (with confirmation).
-    - Admins can delete any specific log entry for any user using `/admindeletelog`.
-- **Admin Tools:**
-  - Admins can check logs (`/checklogs user:@username`) and stats (`/stats user:@username`) for other users.
-  - Admins can log injections for other users using the `/logfor user:@username` command.
-- **Persistent Storage:** All injection records and settings are stored securely in a PostgreSQL database.
-- **Modern Development Stack:**
-  - Built with TypeScript and Discord.js v14.
-  - Uses `pg` (node-postgres) for database interaction.
-  - Uses `node-cron` for scheduling.
-  - Includes ESLint, Prettier, Husky, and lint-staged for code quality and Git hooks.
-  - Uses Winston for structured and readable logging.
+- **Injection logging** — `/injection` with button confirmation. Dose, medication, and raw units are optional.
+- **Automatic leg alternation** — always knows whether Right or Left is next based on your last log.
+- **Log history** — `/checklogs` shows your last 5 entries with dates, leg, medication, and dose.
+- **Stats** — `/stats` shows total injections logged and current streak.
+- **Reminders** — 1-hour warning + on-time prompt posted in the designated channel, including medication and dose.
+- **Catch-up reminders** — if the bot was offline and missed a scheduled reminder, it sends one on restart.
+- **Hormone test reminders** — `/sethormonetest` sets recurring E/T lab reminders at a custom interval.
+- **Dosing helper** — `/convertunits` converts raw syringe units to mg given a vial concentration.
+- **Log deletion** — `/deletemylog` lets users delete their own latest or a specific log (with confirmation). Admins use `/admindeletelog`.
+- **Admin tools** — admins can view logs/stats for any user, log injections on behalf of users with `/logfor`, and manage entries.
+- **Update alerts** — on startup and every 6 hours, the bot checks its git remote. If commits are available it posts a notice in the configured channel.
+- **Persistent storage** — everything lives in PostgreSQL. Restarting or updating the bot loses nothing.
 
 ## Table of Contents
 
@@ -35,183 +25,146 @@
 - [Installation](#installation)
 - [Database Setup](#database-setup)
 - [Configuration](#configuration)
-  - [Environment Variables](#environment-variables)
-- [Usage](#usage)
-  - [Running the Bot](#running-the-bot)
-  - [Available Commands](#available-commands)
+- [Running the Bot](#running-the-bot)
+- [Updating the Bot](#updating-the-bot)
+- [Available Commands](#available-commands)
 - [Development](#development)
-  - [Linting & Formatting](#linting--formatting)
-- [Contributing](#contributing)
 - [License](#license)
 
 ## Prerequisites
 
-- Node.js (v18 or higher recommended)
-- Bun (or npm/yarn for package management)
+- [Bun](https://bun.sh) (recommended runtime)
 - Git
-- Access to a **PostgreSQL database server** (v12 or higher recommended)
+- PostgreSQL (v12 or higher)
 
 ## Installation
 
-1.  **Clone the Repository:**
-    ```bash
-    git clone [https://github.com/ShinniUwU/Injekta.git](https://github.com/ShinniUwU/Injekta.git)
-    cd Injekta
-    ```
-
-2.  **Install Dependencies:**
-    Using Bun (recommended):
-    ```bash
-    bun install
-    ```
-    Using npm:
-    ```bash
-    npm install
-    ```
-
-3.  **Set Up Git Hooks (Optional but Recommended):**
-    Initialize Husky hooks (used for pre-commit linting/formatting):
-    ```bash
-    bun run prepare
-    # or npm run prepare
-    ```
-    *(Proceed to [Database Setup](#database-setup) next)*
+```bash
+git clone https://github.com/ShinniUwU/Injekta.git
+cd Injekta
+bun install
+bun run prepare   # sets up Husky pre-commit hooks (optional)
+```
 
 ## Database Setup
 
-This bot requires a running PostgreSQL database server.
-
-1.  **Ensure PostgreSQL is Running:** Install and run PostgreSQL on your local machine or server. Refer to the official PostgreSQL documentation for your operating system:
-    * [PostgreSQL Downloads](https://www.postgresql.org/download/) (Choose your OS)
-    * Example setup commands for [Debian/Ubuntu](https://www.postgresql.org/download/linux/debian/) or [Fedora](https://www.postgresql.org/download/linux/redhat/).
-
-2.  **Create Database and User:** Connect to your PostgreSQL instance (e.g., using `psql`) and create a dedicated database and user for the bot. Replace `your_secure_password` with a strong password.
+1. **Create a database and user** in your PostgreSQL instance:
 
     ```sql
-    -- Example commands using psql:
     CREATE DATABASE injekta_db;
     CREATE USER injekta_user WITH PASSWORD 'your_secure_password';
     GRANT ALL PRIVILEGES ON DATABASE injekta_db TO injekta_user;
     ```
 
-3.  **Create Database Schema:** Navigate to the project directory (`Injekta`) in your terminal and use the `psql` client to run the provided `schema.sql` script. This will create the necessary tables (`injections`, `global_settings`). Replace placeholders with your actual connection details.
+2. **Apply the schema:**
 
     ```bash
-    psql -h <hostname> -p <port> -U injekta_user -d injekta_db -f schema.sql
+    psql -h localhost -p 5432 -U injekta_user -d injekta_db -f schema.sql
     ```
-    *(Example: `psql -h localhost -p 5432 -U injekta_user -d injekta_db -f schema.sql`)*
-    Enter the password for `injekta_user` when prompted.
 
-    > Upgrading from an older schema? Run the following before the bot restarts to migrate `injection_date` from the old `DD-MM-YYYY` string to a proper timestamptz:
-    > ```sql
-    > ALTER TABLE injections
-    >   ALTER COLUMN injection_date TYPE TIMESTAMPTZ USING to_timestamp(injection_date, 'DD-MM-YYYY'),
-    >   ALTER COLUMN injection_date SET DEFAULT CURRENT_TIMESTAMP;
-    > ```
+    This creates the `injections`, `global_settings`, and `admin_actions` tables.
+
+> **Upgrading from an older schema?** If your `injection_date` column was stored as a `DD-MM-YYYY` string, migrate it before restarting:
+> ```sql
+> ALTER TABLE injections
+>   ALTER COLUMN injection_date TYPE TIMESTAMPTZ
+>     USING to_timestamp(injection_date, 'DD-MM-YYYY'),
+>   ALTER COLUMN injection_date SET DEFAULT CURRENT_TIMESTAMP;
+> ```
 
 ## Configuration
 
-### Environment Variables
-
-Create a `.env` file in the root of the project directory (`Injekta/.env`). Copy the following variables and fill them with your specific credentials:
+Copy `.env.example` to `.env` and fill in your values:
 
 ```env
-# Discord Bot Credentials
-BOT_TOKEN=your_discord_bot_token             # Your bot's secret token
-CLIENT_ID=your_discord_client_id             # Your bot's application ID
-GUILD_ID=your_discord_guild_id               # The ID of the server where commands will be registered initially
+# Discord
+BOT_TOKEN=your_discord_bot_token
+CLIENT_ID=your_discord_application_id
+GUILD_ID=your_discord_server_id
 
-# PostgreSQL Database Connection URL
-# Format: postgresql://<user>:<password>@<host>:<port>/<database_name>
+# Database
 DATABASE_URL=postgresql://injekta_user:your_secure_password@localhost:5432/injekta_db
 
-# Bot Configuration
-DESIGNATED_CHANNEL_ID=your_discord_channel_id  # ID of the channel for reminders and '/injection' command
-BOT_OWNER_ID=your_discord_user_id              # Optional: Your Discord user ID for potential owner-specific checks
-````
+# Channels
+DESIGNATED_CHANNEL_ID=channel_id_for_injection_logs_and_reminders
+VERSION_NOTIFY_CHANNEL_ID=channel_id_for_update_alerts  # optional, falls back to DESIGNATED_CHANNEL_ID
 
-Replace placeholders like `<user>`, `<password>`, `<host>`, `<port>`, `<database_name>` in `DATABASE_URL` with the actual values for your PostgreSQL setup created in the [Database Setup](https://www.google.com/search?q=%23database-setup) step.
+# Optional
+BOT_OWNER_ID=your_discord_user_id
+```
 
-**Timezone:** `/setinjectionschedule` validates the timezone you pass (IANA names like `UTC`, `America/New_York`). Invalid values are rejected and scheduler falls back to UTC if misconfigured.
+**Timezone:** `/setinjectionschedule` accepts IANA timezone names (e.g. `UTC`, `Europe/London`, `America/New_York`). Invalid values are rejected; the scheduler falls back to UTC.
 
-## Usage
+## Running the Bot
 
-### Running the Bot
+**Development:**
+```bash
+bun run dev
+```
 
-  * **Development:** For local testing and development:
-    ```bash
-    bun run dev
-    ```
-  * **Production/Deployment:** For running the bot continuously on a server, it's highly recommended to use a process manager like `pm2`:
-    ```bash
-    # Install pm2 globally (if not already installed)
-    npm install -g pm2
-    # or bun install -g pm2
+**Production (pm2):**
+```bash
+npm install -g pm2
+pm2 start bun --name injekta -- run dev
+pm2 save          # auto-restart on server reboot
+pm2 logs injekta  # tail logs
+pm2 stop injekta  # stop
+```
 
-    # Start the bot with pm2
-    # Make sure you are in the project directory
-    pm2 start bun --name injekta -- run dev
-    # Or specify the script directly:
-    # pm2 start src/bot.ts --name injekta --interpreter bun
+**First-run checklist:**
+1. Start the bot.
+2. Run `/setupcheck` in Discord to verify DB connection and channel access.
+3. Run `/setinjectionschedule` (admin) to configure the schedule — reminders and `/nextinjection` won't work until this is done.
+4. Optionally run `/sethormonetest` (admin) to enable E/T lab reminders.
 
-    # Optional: Save the pm2 process list to restart automatically on server reboot
-    pm2 save
+## Updating the Bot
 
-    # Monitor logs
-    pm2 logs injekta
+No action is required from end users — everything is stored in PostgreSQL and survives restarts.
 
-    # Stop the bot
-    pm2 stop injekta
-    ```
+On the server:
 
-### Quick start (community members)
+```bash
+git pull
+bun install       # only needed if bun.lockb changed
+pm2 restart injekta
+```
 
-- Go to your server’s HRT/injection channel, run `/help`, and log with `/injection` (dose/medication optional).
-- `/nextinjection` shows when you’re due; `/checklogs` shows your last five; `/deletemylog` fixes mistakes.
-- Stored: your Discord ID, timestamps, leg, and any optional medication/dose/units you provide. Replies stay private. This is a tracking/reminder tool, not medical advice.
+The scheduler re-reads all settings from the database on startup and picks up exactly where it left off. If a reminder was missed while the bot was offline, a catch-up notice is sent automatically.
 
-### Setup (admins, minimal steps)
+**If a future update adds new database columns or tables**, run the relevant `ALTER TABLE` / `CREATE TABLE` SQL against the live database before restarting the bot. Keep `schema.sql` in sync when this happens.
 
-1) Copy `.env.example` → `.env`; fill BOT_TOKEN, CLIENT_ID, GUILD_ID, DATABASE_URL, DESIGNATED_CHANNEL_ID (and optional VERSION_NOTIFY_CHANNEL_ID).  
-2) Run `bun install`.  
-3) Create DB tables with `schema.sql` (e.g., `psql ... -f schema.sql`).  
-4) Start the bot: `bun run dev`.  
-5) In Discord, run `/setupcheck` to verify DB/channel.  
-6) Run `/setinjectionschedule` once so reminders and `/nextinjection` work. `/sethormonetest` is optional.
+## Available Commands
 
-### Update alerts
-
-- The bot checks npm for a newer Injekta version on startup. If found, it posts in the configured channel with update instructions (`git pull && bun install` + restart).
-
-### Web option
-
-- A lightweight site lives in `site/` (moving to its own branch). Runs on Vercel + Neon Postgres. See `site/README.md` if you want a click-to-deploy web logger.
-
-### Commands (quick list)
-
-- `/injection [dose_mg] [medication] [performed_at] [raw_units]`
-- `/help` · `/setupcheck` (admin) · `/checklogs [user]` · `/stats [user]`
-- `/nextinjection` · `/deletemylog [log_id]`
-- `/setinjectionschedule <day> <time> [timezone] [interval_days] [medication] [dose_mg]` (admin)
-- `/sethormonetest [start_date] [interval_days] [timezone]` (admin)
-- `/logfor <user> [dose_mg] [medication]` (admin)
-- `/convertunits <units> <concentration_mg_per_ml>`
-- `/admindeletelog <user> <log_id>` (admin)
+| Command | Description | Who |
+|---------|-------------|-----|
+| `/injection [dose_mg] [medication] [performed_at] [raw_units]` | Log an injection | Everyone |
+| `/checklogs [user]` | View last 5 injection logs | Everyone (admin for others) |
+| `/nextinjection` | Show when the next injection is due | Everyone |
+| `/stats [user]` | Total logs and streak | Everyone (admin for others) |
+| `/deletemylog [log_id]` | Delete your latest log or a specific one by ID | Everyone |
+| `/convertunits <units> <concentration_mg_per_ml>` | Convert syringe units to mg | Everyone |
+| `/help` | Show command overview | Everyone |
+| `/timecheck` | Show current time in the configured timezone | Everyone |
+| `/health` | Check bot and database status | Everyone |
+| `/setinjectionschedule <day> <time> [timezone] [interval_days] [medication] [dose_mg]` | Configure the global injection schedule | Admin |
+| `/sethormonetest [start_date] [interval_days] [timezone]` | Configure hormone test reminders | Admin |
+| `/logfor <user> [dose_mg] [medication]` | Log an injection for another user | Admin |
+| `/admindeletelog <user> <log_id>` | Delete any user's log entry | Admin |
+| `/updatecheck` | Manually check for available git updates | Admin |
+| `/setupcheck` | Verify DB connection and channel config | Admin |
 
 ## Development
 
-### Linting & Formatting
+```bash
+bun run lint            # ESLint
+bun run prettier-check  # check formatting
+bun run prettier-write  # apply formatting
+```
 
-This project uses ESLint for linting and Prettier for code formatting. Git hooks are set up using Husky and lint-staged to automatically lint and format code on commit.
+Git hooks (Husky + lint-staged) run ESLint and Prettier automatically on commit.
 
-  * Check formatting: `bun run prettier-check`
-  * Apply formatting: `bun run prettier-write`
-  * Run linter: `bun run lint`
-
-## Contributing
-
-Contributions are welcome\! Please feel free to submit a Pull Request or open an Issue.
+**Stack:** TypeScript · Discord.js v14 · pg (node-postgres) · Luxon · Winston · Bun
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](https://www.google.com/search?q=LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).

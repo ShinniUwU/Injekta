@@ -42,16 +42,19 @@ client.once('ready', async () => {
   logger.info(`Logged in as ${client.user.tag}`);
   try {
     await refreshCommands(config.clientId, config.guildId, config.botToken);
+  } catch (error) {
+    logger.error('Failed to register slash commands:', error);
+  }
+
+  try {
     logger.info('Attempting to initialize scheduler...');
     await initializeScheduler(client);
-    void notifyIfOutdated(client);
-    // Periodic git update check every 6 hours
-    setInterval(() => void notifyIfOutdated(client), 6 * 60 * 60 * 1000);
-    // Check if scheduler started correctly now
-    // logger.info('Scheduler initialization process completed.');
   } catch (error) {
-    logger.error('Error during initialization:', error);
+    logger.error('Scheduler initialization failed; reminders will not fire:', error);
   }
+
+  void notifyIfOutdated(client);
+  setInterval(() => void notifyIfOutdated(client), 6 * 60 * 60 * 1000);
 });
 
 client.on('interactionCreate', async (interaction) => {

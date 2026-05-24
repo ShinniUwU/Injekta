@@ -2,7 +2,6 @@
 import type {
   Client,
   CommandInteraction,
-  MessageComponentInteraction,
   Message,
   InteractionEditReplyOptions,
 } from 'discord.js';
@@ -11,8 +10,9 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
-  MessageFlags, // Import MessageFlags
+  MessageFlags,
 } from 'discord.js';
+import { awaitConfirmation } from '../utils/awaitConfirm';
 import { createInjectionRecord, getGlobalSettings } from '../database';
 import { config } from '../config';
 import logger from '../logger';
@@ -106,101 +106,71 @@ export async function handleInjectionCommand(
 
   const replyMessage = (await interaction.fetchReply()) as Message;
 
-  const filter = (i: MessageComponentInteraction) =>
-    (i.customId === confirmCustomId || i.customId === cancelCustomId) &&
-    i.user.id === interaction.user.id;
+  const timeoutEmbed = new EmbedBuilder(confirmationEmbed.toJSON())
+    .setDescription('Confirmation timed out or failed. Injection not recorded.')
+    .setColor(0xe74c3c);
 
-  try {
-    const buttonInteraction = await replyMessage.awaitMessageComponent({
-      filter,
-      time: 60000,
+  const result = await awaitConfirmation({
+    interaction,
+    replyMessage,
+    confirmId: confirmCustomId,
+    cancelId: cancelCustomId,
+    confirmButton,
+    cancelButton,
+    timeoutEmbed,
+  });
+
+  if (result === 'timeout') return;
+
+  let replyOptions: InteractionEditReplyOptions = {};
+
+  if (result === 'confirmed') {
+    logger.info(`Injection confirmed by ${interaction.user.tag} via button.`);
+    const defaults = await getGlobalSettings();
+    const tz = defaults?.timezone ?? 'UTC';
+    const performedAtDate = performedAt
+      ? parseUserDateTimeInput(performedAt, tz)
+      : null;
+    const record = await createInjectionRecord(interaction.user.id, {
+      medication: medication ?? defaults?.medication ?? null,
+      doseMg: doseMg ?? (defaults?.dose_mg ?? null),
+      performedAt: performedAtDate ?? undefined,
+      rawUnits,
     });
 
-    if (!buttonInteraction) {
-      throw new Error('Confirmation timed out.');
-    }
-
-    let replyOptions: InteractionEditReplyOptions = {};
-
-    if (buttonInteraction.customId === confirmCustomId) {
-      await buttonInteraction.deferUpdate();
-      logger.info(`Injection confirmed by ${interaction.user.tag} via button.`);
-      const defaults = await getGlobalSettings();
-      const tz = defaults?.timezone ?? 'UTC';
-      const performedAtDate = performedAt
-        ? parseUserDateTimeInput(performedAt, tz)
-        : null;
-      const record = await createInjectionRecord(interaction.user.id, {
-        medication: medication ?? defaults?.medication ?? null,
-        doseMg: doseMg ?? (defaults?.dose_mg ?? null),
-        performedAt: performedAtDate ?? undefined,
-        rawUnits,
-      });
-
-      if (record) {
-        const medLabel = record.medication ? `\nMedication: **${record.medication}**` : '';
-        const doseLabel =
-          record.dose_mg !== null && record.dose_mg !== undefined
-            ? `\nDose: **${record.dose_mg} mg**`
-            : '';
-        const unitLabel =
-          record.raw_units !== null && record.raw_units !== undefined
-            ? `\nRaw units: **${record.raw_units}**`
-            : '';
-        const performedLabel = record.performed_at
-          ? `\nPerformed at: **${record.performed_at}**`
+    if (record) {
+      const medLabel = record.medication ? `\nMedication: **${record.medication}**` : '';
+      const doseLabel =
+        record.dose_mg !== null && record.dose_mg !== undefined
+          ? `\nDose: **${record.dose_mg} mg**`
           : '';
-        replyOptions = {
-          content: `Injection recorded successfully: **${record.leg} leg** on **${record.date}**.${medLabel}${doseLabel}${unitLabel}${performedLabel}\nNice job taking care of yourself.`,
-          embeds: [],
-          components: [],
-        };
-      } else {
-        replyOptions = {
-          content:
-            'There was an error recording the injection in the database.',
-          embeds: [],
-          components: [],
-        };
-      }
-      await interaction.editReply(replyOptions);
-    } else if (buttonInteraction.customId === cancelCustomId) {
-      await buttonInteraction.deferUpdate();
-      logger.info(`Injection cancelled by ${interaction.user.tag} via button.`);
+      const unitLabel =
+        record.raw_units !== null && record.raw_units !== undefined
+          ? `\nRaw units: **${record.raw_units}**`
+          : '';
+      const performedLabel = record.performed_at
+        ? `\nPerformed at: **${record.performed_at}**`
+        : '';
       replyOptions = {
-        content: 'Injection recording cancelled.',
+        content: `Injection recorded successfully: **${record.leg} leg** on **${record.date}**.${medLabel}${doseLabel}${unitLabel}${performedLabel}\nNice job taking care of yourself.`,
         embeds: [],
         components: [],
       };
-      await interaction.editReply(replyOptions);
+    } else {
+      replyOptions = {
+        content: 'There was an error recording the injection in the database.',
+        embeds: [],
+        components: [],
+      };
     }
-  } catch (error) {
-    // ... (rest of catch block)
-    logger.warn(
-      `Confirmation timed out or error for ${interaction.user.tag}:`,
-      error instanceof Error ? error.message : error,
-    );
-    const timedOutEmbed = new EmbedBuilder(confirmationEmbed.toJSON())
-      .setDescription(
-        'Confirmation timed out or failed. Injection not recorded.',
-      )
-      .setColor(0xe74c3c);
-
-    confirmButton.setDisabled(true);
-    cancelButton.setDisabled(true);
-    const disabledRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      confirmButton,
-      cancelButton,
-    );
-
-    const editOptions: InteractionEditReplyOptions = {
-      embeds: [timedOutEmbed],
-      components: [disabledRow],
+  } else {
+    logger.info(`Injection cancelled by ${interaction.user.tag} via button.`);
+    replyOptions = {
+      content: 'Injection recording cancelled.',
+      embeds: [],
+      components: [],
     };
-    await interaction
-      .editReply(editOptions)
-      .catch((editError) =>
-        logger.error('Failed to edit reply after timeout/error:', editError),
-      );
   }
+
+  await interaction.editReply(replyOptions);
 }
