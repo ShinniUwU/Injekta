@@ -32,6 +32,7 @@ function runGit(command: string, opts?: { silentOnError?: boolean; timeoutMs?: n
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: PROJECT_ROOT,
       timeout: opts?.timeoutMs,
+      shell: true,
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     })
       .toString()
@@ -45,8 +46,7 @@ function runGit(command: string, opts?: { silentOnError?: boolean; timeoutMs?: n
 }
 
 function hasGitRepo(): boolean {
-  const res = runGit('git rev-parse --is-inside-work-tree', { silentOnError: true });
-  return res === 'true';
+  return existsSync(join(PROJECT_ROOT, '.git'));
 }
 
 function hasRemote(remote = 'origin'): boolean {
