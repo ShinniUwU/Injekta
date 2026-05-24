@@ -50,11 +50,36 @@ function hasGitRepo(): boolean {
 }
 
 function hasRemote(remote = 'origin'): boolean {
-  return Boolean(runGit(`git remote get-url ${remote}`, { silentOnError: true }));
+  try {
+    const cfg = readFileSync(join(PROJECT_ROOT, '.git', 'config'), 'utf-8');
+    return cfg.includes(`[remote "${remote}"]`);
+  } catch {
+    return false;
+  }
 }
 
 function getLocalHead(): string | null {
-  return runGit('git rev-parse HEAD');
+  try {
+    const head = readFileSync(join(PROJECT_ROOT, '.git', 'HEAD'), 'utf-8').trim();
+    if (head.startsWith('ref: ')) {
+      const ref = head.slice(5).trim();
+      const refFile = join(PROJECT_ROOT, '.git', ref);
+      if (existsSync(refFile)) {
+        return readFileSync(refFile, 'utf-8').trim();
+      }
+      const packedRefs = join(PROJECT_ROOT, '.git', 'packed-refs');
+      if (existsSync(packedRefs)) {
+        for (const line of readFileSync(packedRefs, 'utf-8').split('\n')) {
+          if (line.endsWith(` ${ref}`)) return line.split(' ')[0] ?? null;
+        }
+      }
+      return null;
+    }
+    return head || null;
+  } catch (err) {
+    logger.warn('Failed to read local git HEAD', { err });
+    return null;
+  }
 }
 
 function getRemoteHead(remote = 'origin', ref = 'HEAD'): string | null {
