@@ -373,72 +373,58 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
     } catch (error) {
       logger.error('Error in hormone test reminder execution:', error);
     }
-    scheduleTestReminder();
+    await scheduleTestReminder();
   };
 
-  const scheduleTestReminder = () => {
+  const scheduleTestReminder = async () => {
     if (
-      settings.test_start_time &&
-      settings.test_interval_days &&
-      settings.test_interval_days > 0
-    ) {
-      const nextTest = getNextFromAnchor(
-        settings.test_start_time,
-        Number(settings.test_interval_days),
-        settings.test_timezone ?? timezone,
-      );
-      if (nextTest) {
-        const lastTestRun = settings.test_last_run_at
-          ? DateTime.fromISO(settings.test_last_run_at, {
-              zone: settings.test_timezone ?? timezone,
-            })
-          : null;
-        const prevTest = nextTest.minus({
-          days: Number(settings.test_interval_days),
-        });
-        if (!lastTestRun || (prevTest.isValid && lastTestRun < prevTest)) {
-          // Fire a catch-up test reminder
-          void (async () => {
-            try {
-              const channel = (await client.channels.fetch(channelId).catch(
-                (err) => {
-                  logger.error(
-                    `Failed to fetch channel ${channelId} for test catch-up:`,
-                    err,
-                  );
-                  return null;
-                },
-              )) as TextChannel | null;
-              if (channel) {
-                const testEmbed = new EmbedBuilder()
-                  .setTitle('Hormone Test Reminder (Catch-up)')
-                  .setDescription(
-                    `A scheduled hormone test reminder may have been missed while the bot was offline. Please verify your upcoming labs.`,
-                  )
-                  .setColor(0x8e44ad)
-                  .setTimestamp();
-                await channel.send({ embeds: [testEmbed] });
-                await updateSchedulerRunTimes(undefined, new Date().toISOString());
-              }
-            } catch (err) {
-              logger.error('Failed to send test catch-up reminder', err);
-            }
-          })();
-        }
+      !settings.test_start_time ||
+      !settings.test_interval_days ||
+      settings.test_interval_days <= 0
+    ) return;
 
-        testReminderTimeout = scheduleTimeout(
-          nextTest,
-          sendTestReminder,
-          'hormone-test',
-        );
-        logger.info(
-          `Scheduled hormone test reminder at ${nextTest.toISO()} (${settings.test_timezone ?? timezone}) every ${settings.test_interval_days} day(s).`,
-        );
+    const nextTest = getNextFromAnchor(
+      settings.test_start_time,
+      Number(settings.test_interval_days),
+      settings.test_timezone ?? timezone,
+    );
+    if (!nextTest) return;
+
+    const lastTestRun = settings.test_last_run_at
+      ? DateTime.fromISO(settings.test_last_run_at, {
+          zone: settings.test_timezone ?? timezone,
+        })
+      : null;
+    const prevTest = nextTest.minus({ days: Number(settings.test_interval_days) });
+
+    if (!lastTestRun || (prevTest.isValid && lastTestRun < prevTest)) {
+      try {
+        const channel = await fetchChannelWithRetry(client, channelId, 2, 1500);
+        if (channel) {
+          const testEmbed = new EmbedBuilder()
+            .setTitle('Hormone Test Reminder (Catch-up)')
+            .setDescription(
+              `A scheduled hormone test reminder may have been missed while the bot was offline. Please verify your upcoming labs.`,
+            )
+            .setColor(0x8e44ad)
+            .setTimestamp();
+          await channel.send({ embeds: [testEmbed] });
+          await updateSchedulerRunTimes(undefined, new Date().toISOString());
+        } else {
+          logger.error(`Designated channel ${channelId} not found for test catch-up reminder.`);
+        }
+      } catch (err) {
+        logger.error('Failed to send test catch-up reminder', err);
       }
     }
+
+    testReminderTimeout = scheduleTimeout(nextTest, sendTestReminder, 'hormone-test');
+    logger.info(
+      `Scheduled hormone test reminder at ${nextTest.toISO()} (${settings.test_timezone ?? timezone}) every ${settings.test_interval_days} day(s).`,
+    );
   };
 
-  scheduleTestReminder();
+  await scheduleTestReminder();
 } // Closing brace for internalScheduleJobs
 
 export function getSchedulerStatus() {

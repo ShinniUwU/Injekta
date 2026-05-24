@@ -1,6 +1,6 @@
 // src/versionCheck.ts
 import { execSync } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs';
 import { join } from 'path';
 import type { TextBasedChannel } from 'discord.js';
 import { Client } from 'discord.js';
@@ -89,11 +89,10 @@ function persistState() {
     if (!existsSync(STATE_DIR)) {
       mkdirSync(STATE_DIR, { recursive: true });
     }
-    const payload = {
-      autoNotifyEnabled,
-      lastNotifiedRemote,
-    };
-    writeFileSync(STATE_FILE, JSON.stringify(payload, null, 2));
+    const payload = { autoNotifyEnabled, lastNotifiedRemote };
+    const tmpFile = `${STATE_FILE}.tmp`;
+    writeFileSync(tmpFile, JSON.stringify(payload, null, 2));
+    renameSync(tmpFile, STATE_FILE);
   } catch (error) {
     logger.warn('Failed to persist update-check state.', { error });
   }
