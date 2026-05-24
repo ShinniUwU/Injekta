@@ -1,7 +1,7 @@
 // src/versionCheck.ts
 import { execSync } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import type { TextBasedChannel } from 'discord.js';
 import { Client } from 'discord.js';
 import logger from './logger';
@@ -20,7 +20,9 @@ let warnedNoRepo = false;
 let warnedNoRemote = false;
 let stateLoaded = false;
 
-const STATE_DIR = join(process.cwd(), '.data');
+// Anchor to the project root regardless of where systemd (or anything else) sets cwd
+const PROJECT_ROOT = resolve(import.meta.dir, '..');
+const STATE_DIR = join(PROJECT_ROOT, '.data');
 const STATE_FILE = join(STATE_DIR, 'update-check.json');
 
 function runGit(command: string, opts?: { silentOnError?: boolean }): string | null {
@@ -28,6 +30,7 @@ function runGit(command: string, opts?: { silentOnError?: boolean }): string | n
     return execSync(command, {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: PROJECT_ROOT,
     })
       .toString()
       .trim();
