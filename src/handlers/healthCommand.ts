@@ -31,6 +31,9 @@ export async function handleHealthCommand(interaction: CommandInteraction) {
     `Reminder scheduled: **${scheduler.reminderScheduled ? 'yes' : 'no'}**${
       scheduler.nextReminderISO ? ` (next ${scheduler.nextReminderISO})` : ''
     }`,
+    `Nag active: **${scheduler.nagActive ? 'yes' : 'no'}**${
+      scheduler.nagDeadlineISO ? ` (until ${scheduler.nagDeadlineISO})` : ''
+    }`,
     `Timezone: **${scheduler.timezone ?? 'unknown'}**`,
   ];
 
