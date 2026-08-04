@@ -1,18 +1,16 @@
 // src/handlers/adminDeleteLogCommand.ts
 import type { CommandInteraction } from 'discord.js';
-import { MessageFlags, PermissionFlagsBits } from 'discord.js';
+import { MessageFlags } from 'discord.js';
 import { deleteLogById, recordAdminAction } from '../database';
 import logger from '../logger';
 import { formatTimestampForDisplay } from '../time';
+import { hasAdminPermission } from '../utils/permissions';
 
 export async function handleAdminDeleteLogCommand(
   interaction: CommandInteraction,
 ) {
   // Permission check
-  if (
-    !interaction.inGuild() ||
-    !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)
-  ) {
+  if (!interaction.inGuild() || !hasAdminPermission(interaction)) {
     await interaction.reply({
       content: 'You need Administrator permissions to use this command.',
       flags: MessageFlags.Ephemeral,
@@ -59,7 +57,9 @@ export async function handleAdminDeleteLogCommand(
       targetUserId: targetUser.id,
       action: 'admindeletelog',
       logId,
-      details: `Deleted ${result.deletedRecord.leg} on ${result.deletedRecord.performed_at ?? result.deletedRecord.injection_date}`,
+      details: `Deleted ${result.deletedRecord.leg} on ${
+        result.deletedRecord.performed_at ?? result.deletedRecord.injection_date
+      }`,
     });
     const medLabel = result.deletedRecord.medication
       ? ` | Medication: ${result.deletedRecord.medication}`
@@ -70,7 +70,15 @@ export async function handleAdminDeleteLogCommand(
         ? ` | Dose: ${result.deletedRecord.dose_mg} mg`
         : '';
     await interaction.editReply(
-      `Successfully deleted log entry #${logId} for user ${targetUser.username}. Details: ${result.deletedRecord.leg} leg on ${formatTimestampForDisplay(result.deletedRecord.performed_at ?? result.deletedRecord.injection_date, interaction.locale ?? 'en-US')}.${medLabel}${doseLabel}`,
+      `Successfully deleted log entry #${logId} for user ${
+        targetUser.username
+      }. Details: ${
+        result.deletedRecord.leg
+      } leg on ${formatTimestampForDisplay(
+        result.deletedRecord.performed_at ??
+          result.deletedRecord.injection_date,
+        interaction.locale ?? 'en-US',
+      )}.${medLabel}${doseLabel}`,
     );
   } else {
     logger.warn(

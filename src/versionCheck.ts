@@ -1,6 +1,12 @@
 // src/versionCheck.ts
 import { execSync } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+} from 'fs';
 import { join, resolve } from 'path';
 import type { TextBasedChannel } from 'discord.js';
 import { Client } from 'discord.js';
@@ -25,14 +31,16 @@ const PROJECT_ROOT = resolve(import.meta.dir, '..');
 const STATE_DIR = join(PROJECT_ROOT, '.data');
 const STATE_FILE = join(STATE_DIR, 'update-check.json');
 
-function runGit(command: string, opts?: { silentOnError?: boolean; timeoutMs?: number }): string | null {
+function runGit(
+  command: string,
+  opts?: { silentOnError?: boolean; timeoutMs?: number },
+): string | null {
   try {
     return execSync(command, {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: PROJECT_ROOT,
       timeout: opts?.timeoutMs,
-      shell: true,
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     })
       .toString()
@@ -60,7 +68,10 @@ function hasRemote(remote = 'origin'): boolean {
 
 function getLocalHead(): string | null {
   try {
-    const head = readFileSync(join(PROJECT_ROOT, '.git', 'HEAD'), 'utf-8').trim();
+    const head = readFileSync(
+      join(PROJECT_ROOT, '.git', 'HEAD'),
+      'utf-8',
+    ).trim();
     if (head.startsWith('ref: ')) {
       const ref = head.slice(5).trim();
       const refFile = join(PROJECT_ROOT, '.git', ref);
@@ -85,7 +96,9 @@ function getLocalHead(): string | null {
 function getRemoteUrl(remote = 'origin'): string | null {
   try {
     const cfg = readFileSync(join(PROJECT_ROOT, '.git', 'config'), 'utf-8');
-    const match = cfg.match(new RegExp(`\\[remote "${remote}"\\][\\s\\S]*?url\\s*=\\s*(.+)`));
+    const match = cfg.match(
+      new RegExp(`\\[remote "${remote}"\\][\\s\\S]*?url\\s*=\\s*(.+)`),
+    );
     return match?.[1]?.trim() ?? null;
   } catch {
     return null;
@@ -95,7 +108,9 @@ function getRemoteUrl(remote = 'origin'): string | null {
 function getRemoteHead(remote = 'origin', ref = 'HEAD'): string | null {
   const url = getRemoteUrl(remote);
   if (!url) {
-    logger.warn(`Update check: could not read URL for remote "${remote}" from git config.`);
+    logger.warn(
+      `Update check: could not read URL for remote "${remote}" from git config.`,
+    );
     return null;
   }
   const output = runGit(`git ls-remote "${url}" ${ref}`, { timeoutMs: 10000 });
@@ -120,12 +135,17 @@ function loadState() {
       if (typeof parsed.autoNotifyEnabled === 'boolean') {
         autoNotifyEnabled = parsed.autoNotifyEnabled;
       }
-      if (typeof parsed.lastNotifiedRemote === 'string' || parsed.lastNotifiedRemote === null) {
+      if (
+        typeof parsed.lastNotifiedRemote === 'string' ||
+        parsed.lastNotifiedRemote === null
+      ) {
         lastNotifiedRemote = parsed.lastNotifiedRemote ?? null;
       }
     }
   } catch (error) {
-    logger.warn('Failed to load update-check state; using defaults.', { error });
+    logger.warn('Failed to load update-check state; using defaults.', {
+      error,
+    });
   }
 }
 
@@ -174,13 +194,17 @@ export function getUpdateStatus(): UpdateStatus {
 
   const local = getLocalHead();
   if (!local) {
-    logger.warn('Update check: could not resolve local HEAD (git rev-parse HEAD failed).');
+    logger.warn(
+      'Update check: could not resolve local HEAD (git rev-parse HEAD failed).',
+    );
     return { local: null, remote: null, state: 'unknown' };
   }
 
   const remote = getRemoteHead();
   if (!remote) {
-    logger.warn('Update check: could not resolve remote HEAD (git ls-remote failed).');
+    logger.warn(
+      'Update check: could not resolve remote HEAD (git ls-remote failed).',
+    );
     return { local, remote: null, state: 'unknown' };
   }
   if (local === remote) {
@@ -197,14 +221,20 @@ async function sendUpdateNotice(
   try {
     const channel = await client.channels.fetch(channelId);
     if (!channel || !channel.isTextBased()) {
-      logger.warn('Configured version notification channel is not text-based or not found', {
-        channelId,
-      });
+      logger.warn(
+        'Configured version notification channel is not text-based or not found',
+        {
+          channelId,
+        },
+      );
       return;
     }
 
     if (!('send' in channel)) {
-      logger.warn('Configured version notification channel cannot send messages', { channelId });
+      logger.warn(
+        'Configured version notification channel cannot send messages',
+        { channelId },
+      );
       return;
     }
 
@@ -212,17 +242,25 @@ async function sendUpdateNotice(
       send: (content: string) => Promise<unknown>;
     };
     await textChannel.send(
-      `A new commit is available on origin: **${shortSha(status.remote)}** (running **${shortSha(
+      `A new commit is available on origin: **${shortSha(
+        status.remote,
+      )}** (running **${shortSha(
         status.local,
       )}**). Update with \`git pull && bun install\` and restart the bot.`,
     );
     logger.info(`Posted git update notice to channel ${channelId}`);
   } catch (error) {
-    logger.warn('Failed to send version update notification', { channelId, error });
+    logger.warn('Failed to send version update notification', {
+      channelId,
+      error,
+    });
   }
 }
 
-export async function notifyIfOutdated(client: Client, opts?: { force?: boolean }) {
+export async function notifyIfOutdated(
+  client: Client,
+  opts?: { force?: boolean },
+) {
   const status = getUpdateStatus();
 
   if (!opts?.force && !autoNotifyEnabled) {
@@ -243,7 +281,9 @@ export async function notifyIfOutdated(client: Client, opts?: { force?: boolean 
 
   // Avoid spamming the same commit repeatedly during periodic checks
   if (!opts?.force && lastNotifiedRemote === status.remote) {
-    logger.info('Skipping version alert: already notified for this remote commit.');
+    logger.info(
+      'Skipping version alert: already notified for this remote commit.',
+    );
     return;
   }
 

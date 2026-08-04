@@ -1,10 +1,11 @@
 // src/handlers/statsCommand.ts
 import type { CommandInteraction, User } from 'discord.js';
-import { EmbedBuilder, MessageFlags, PermissionFlagsBits } from 'discord.js';
+import { EmbedBuilder, MessageFlags } from 'discord.js';
 // Import the NEW function instead of supabase
 import { getAllUserRecords } from '../database';
 import type { InjectionRecord } from '../database'; // Use type from database.ts
 import logger from '../logger';
+import { hasAdminPermission } from '../utils/permissions';
 
 export async function handleStatsCommand(interaction: CommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -17,18 +18,14 @@ export async function handleStatsCommand(interaction: CommandInteraction) {
 
   if (targetUserFromOption) {
     if (
-      !interaction.inGuild() ||
-      !interaction.member ||
-      typeof interaction.member.permissions === 'string' ||
-      !interaction.member.permissions.has(PermissionFlagsBits.Administrator)
+      targetUserFromOption.id !== interaction.user.id &&
+      !hasAdminPermission(interaction)
     ) {
-      if (targetUserFromOption.id !== interaction.user.id) {
-        await interaction.editReply({
-          content:
-            'You need Administrator permissions to check stats for other users.',
-        });
-        return;
-      }
+      await interaction.editReply({
+        content:
+          'You need Administrator permissions to check stats for other users.',
+      });
+      return;
     }
     userIdToCheck = targetUserFromOption.id;
     userToCheck = targetUserFromOption;
@@ -67,7 +64,8 @@ export async function handleStatsCommand(interaction: CommandInteraction) {
     // Iterate backwards from the second-to-last record
     for (let i = records.length - 1; i > 0; i--) {
       try {
-        const currentDateSrc = records[i]?.performed_at || records[i]?.injection_date;
+        const currentDateSrc =
+          records[i]?.performed_at || records[i]?.injection_date;
         const prevDateSrc =
           records[i - 1]?.performed_at || records[i - 1]?.injection_date;
 

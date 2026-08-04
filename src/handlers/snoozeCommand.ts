@@ -1,13 +1,10 @@
 import type { CommandInteraction } from 'discord.js';
 import { MessageFlags } from 'discord.js';
 import { snoozeNag } from '../scheduler';
+import { getOptionNumber } from '../utils/options';
 
 export async function handleSnoozeCommand(interaction: CommandInteraction) {
-  const hoursOption = interaction.options.get('hours');
-  const hours =
-    hoursOption && typeof hoursOption.value === 'number'
-      ? hoursOption.value
-      : null;
+  const hours = getOptionNumber(interaction, 'hours');
 
   if (hours === null || hours <= 0) {
     await interaction.reply({

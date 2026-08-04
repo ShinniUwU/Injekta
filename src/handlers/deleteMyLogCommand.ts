@@ -1,8 +1,5 @@
 // src/handlers/deleteMyLogCommand.ts
-import type {
-  CommandInteraction,
-  Message,
-} from 'discord.js';
+import type { CommandInteraction, Message } from 'discord.js';
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -12,19 +9,16 @@ import {
   MessageFlags,
 } from 'discord.js';
 import { deleteLogById, deleteLatestLogForUser } from '../database';
+import type { InjectionRecord } from '../database';
 import { awaitConfirmation } from '../utils/awaitConfirm';
 import logger from '../logger';
 import { formatTimestampForDisplay } from '../time';
+import { getOptionNumber } from '../utils/options';
 
 export async function handleDeleteMyLogCommand(
   interaction: CommandInteraction,
 ) {
-  // Use .get('option_name') and access .value
-  const logIdOption = interaction.options.get('log_id', false); // Optional option
-  const logIdToDelete =
-    logIdOption && typeof logIdOption.value === 'number'
-      ? logIdOption.value
-      : null; // Extract value if number
+  const logIdToDelete = getOptionNumber(interaction, 'log_id');
 
   // Validate if ID was provided but invalid
   if (logIdToDelete !== null && logIdToDelete <= 0) {
@@ -105,9 +99,13 @@ export async function handleDeleteMyLogCommand(
   let replyOptions: InteractionEditReplyOptions = {};
 
   if (confirmed === 'confirmed') {
-    logger.info(`${interaction.user.tag} confirmed deletion for ${targetLogDesc}.`);
+    logger.info(
+      `${interaction.user.tag} confirmed deletion for ${targetLogDesc}.`,
+    );
 
-    let result: { success: boolean; deletedRecord?: any } = { success: false };
+    let result: { success: boolean; deletedRecord?: InjectionRecord } = {
+      success: false,
+    };
     if (operationType === 'specific' && logIdToDelete) {
       result = await deleteLogById(logIdToDelete, interaction.user.id);
     } else if (operationType === 'latest') {
@@ -116,7 +114,9 @@ export async function handleDeleteMyLogCommand(
 
     if (result.success && result.deletedRecord) {
       const deletedInfo = result.deletedRecord;
-      const medLabel = deletedInfo.medication ? ` | Medication: ${deletedInfo.medication}` : '';
+      const medLabel = deletedInfo.medication
+        ? ` | Medication: ${deletedInfo.medication}`
+        : '';
       const doseLabel =
         deletedInfo.dose_mg !== null && deletedInfo.dose_mg !== undefined
           ? ` | Dose: ${deletedInfo.dose_mg} mg`
@@ -126,11 +126,20 @@ export async function handleDeleteMyLogCommand(
           ? ` | Units: ${deletedInfo.raw_units}`
           : '';
       replyOptions = {
-        content: `Successfully deleted log entry #${deletedInfo.id} (${deletedInfo.leg} leg on ${formatTimestampForDisplay(deletedInfo.performed_at ?? deletedInfo.injection_date, interaction.locale ?? 'en-US')}${medLabel}${doseLabel}${unitLabel}).`,
+        content: `Successfully deleted log entry #${deletedInfo.id} (${
+          deletedInfo.leg
+        } leg on ${formatTimestampForDisplay(
+          deletedInfo.performed_at ?? deletedInfo.injection_date,
+          interaction.locale ?? 'en-US',
+        )}${medLabel}${doseLabel}${unitLabel}).`,
         embeds: [],
         components: [],
       };
-    } else if (result.success && !result.deletedRecord && operationType === 'latest') {
+    } else if (
+      result.success &&
+      !result.deletedRecord &&
+      operationType === 'latest'
+    ) {
       replyOptions = {
         content: 'Successfully deleted your latest log entry.',
         embeds: [],
@@ -144,13 +153,16 @@ export async function handleDeleteMyLogCommand(
       };
     } else {
       replyOptions = {
-        content: 'Failed to delete the log entry. No log might exist or an error occurred.',
+        content:
+          'Failed to delete the log entry. No log might exist or an error occurred.',
         embeds: [],
         components: [],
       };
     }
   } else {
-    logger.info(`${interaction.user.tag} cancelled deletion for ${targetLogDesc}.`);
+    logger.info(
+      `${interaction.user.tag} cancelled deletion for ${targetLogDesc}.`,
+    );
     replyOptions = {
       content: 'Deletion cancelled.',
       embeds: [],

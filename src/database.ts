@@ -44,7 +44,7 @@ try {
     connectionTimeoutMillis: 5000,
     idleTimeoutMillis: 30000,
   });
-  pool.on('error', (err, client) => {
+  pool.on('error', (err) => {
     logger.error('Unexpected error on idle PostgreSQL client', {
       pgError: err,
     });
@@ -92,7 +92,7 @@ export async function getLastRecord(
 // Ensure this function is exported correctly
 export async function getRecentLogs(
   userId: string,
-  limit: number = 5,
+  limit = 5,
 ): Promise<InjectionRecord[]> {
   const queryText = `
         SELECT id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id, created_at
@@ -185,18 +185,15 @@ export async function createInjectionRecord(
     rawUnits?: number | null;
     adminUserId?: string | null;
   },
-): Promise<
-  | {
-      id: number;
-      leg: 'Right' | 'Left';
-      date: string;
-      medication: string | null;
-      dose_mg: number | string | null;
-      performed_at: string;
-      raw_units: number | null;
-    }
-  | null
-> {
+): Promise<{
+  id: number;
+  leg: 'Right' | 'Left';
+  date: string;
+  medication: string | null;
+  dose_mg: number | string | null;
+  performed_at: string;
+  raw_units: number | null;
+} | null> {
   try {
     const lastRecord = await getLastRecord(userId);
     const nextLeg = getNextLeg(lastRecord?.leg);

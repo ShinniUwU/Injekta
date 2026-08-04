@@ -1,20 +1,12 @@
 // src/handlers/setupCheckCommand.ts
 import type { CommandInteraction } from 'discord.js';
-import {
-  EmbedBuilder,
-  MessageFlags,
-  PermissionFlagsBits,
-} from 'discord.js';
+import { EmbedBuilder, MessageFlags } from 'discord.js';
 import { config } from '../config';
 import { getGlobalSettings, pingDatabase } from '../database';
+import { hasAdminPermission } from '../utils/permissions';
 
 export async function handleSetupCheckCommand(interaction: CommandInteraction) {
-  if (
-    !interaction.inGuild() ||
-    !interaction.member ||
-    typeof interaction.member.permissions === 'string' ||
-    !interaction.member.permissions.has(PermissionFlagsBits.Administrator)
-  ) {
+  if (!interaction.inGuild() || !hasAdminPermission(interaction)) {
     await interaction.reply({
       content: 'Ask a server admin to run this setup check.',
       flags: MessageFlags.Ephemeral,
@@ -68,7 +60,9 @@ export async function handleSetupCheckCommand(interaction: CommandInteraction) {
           'After DATABASE_URL and DESIGNATED_CHANNEL_ID are set, restart the bot so slash commands refresh. Use /sethormonetest for lab reminders if your community wants them.',
       },
     )
-    .setFooter({ text: 'You are almost done—thank you for supporting your community.' })
+    .setFooter({
+      text: 'You are almost done—thank you for supporting your community.',
+    })
     .setTimestamp();
 
   await interaction.editReply({ embeds: [embed] });

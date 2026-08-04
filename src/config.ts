@@ -5,7 +5,7 @@ import logger from './logger';
 dotenv.config();
 
 // Function to safely get environment variables
-function getEnvVariable(key: string, required: boolean = true): string {
+function getEnvVariable(key: string, required = true): string {
   const value = process.env[key];
   if (!value && required) {
     logger.error(`Missing required environment variable: ${key}`);

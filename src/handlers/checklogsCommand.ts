@@ -1,11 +1,11 @@
 // src/handlers/checklogsCommand.ts
 import type { CommandInteraction, User } from 'discord.js';
-import { EmbedBuilder, MessageFlags, PermissionFlagsBits } from 'discord.js';
+import { EmbedBuilder, MessageFlags } from 'discord.js';
 // Ensure this import points to the correctly exported function in src/database.ts
 import { getRecentLogs } from '../database'; // <--- VERIFY THIS LINE
 import type { InjectionRecord } from '../database';
-import logger from '../logger';
 import { formatTimestampForDisplay } from '../time';
+import { hasAdminPermission } from '../utils/permissions';
 
 // ... rest of the file (should be okay from previous updates) ...
 export async function handleChecklogsCommand(interaction: CommandInteraction) {
@@ -19,18 +19,14 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
 
   if (targetUserFromOption) {
     if (
-      !interaction.inGuild() ||
-      !interaction.member ||
-      typeof interaction.member.permissions === 'string' ||
-      !interaction.member.permissions.has(PermissionFlagsBits.Administrator)
+      targetUserFromOption.id !== interaction.user.id &&
+      !hasAdminPermission(interaction)
     ) {
-      if (targetUserFromOption.id !== interaction.user.id) {
-        await interaction.editReply({
-          content:
-            'You need Administrator permissions to check logs for other users.',
-        });
-        return;
-      }
+      await interaction.editReply({
+        content:
+          'You need Administrator permissions to check logs for other users.',
+      });
+      return;
     }
     userIdToCheck = targetUserFromOption.id;
     userToCheck = targetUserFromOption;
@@ -86,7 +82,9 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
       ) || 'Unknown Date';
     return {
       name: `${index + 1}. #${record.id} • ${headerDate}`,
-      value: `${record.leg === 'Right' ? '✅ Right leg' : '❌ Left leg'}${med}${dose}${units}`,
+      value: `${
+        record.leg === 'Right' ? '✅ Right leg' : '❌ Left leg'
+      }${med}${dose}${units}`,
       inline: false,
     };
   });
