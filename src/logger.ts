@@ -3,7 +3,7 @@ import { createLogger, format, transports } from 'winston';
 import util from 'util'; // Import the 'util' module
 
 // Helper function to format metadata, including errors, nicely
-const formatMeta = (meta: any): string => {
+const formatMeta = (meta: Record<PropertyKey, unknown>): string => {
   // Filter out common properties already handled (timestamp, level, message, stack)
   const metaToInspect = { ...meta };
   delete metaToInspect.timestamp;

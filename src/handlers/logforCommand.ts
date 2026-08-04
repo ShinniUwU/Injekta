@@ -1,17 +1,18 @@
 // src/handlers/logforCommand.ts
 import type { CommandInteraction } from 'discord.js';
-import { MessageFlags, PermissionFlagsBits } from 'discord.js';
-import { createInjectionRecord, getGlobalSettings, recordAdminAction } from '../database';
+import { MessageFlags } from 'discord.js';
+import {
+  createInjectionRecord,
+  getGlobalSettings,
+  recordAdminAction,
+} from '../database';
 import logger from '../logger';
 import { parseUserDateTimeInput } from '../time';
+import { hasAdminPermission } from '../utils/permissions';
+import { getOptionNumber, getOptionString } from '../utils/options';
 
 export async function handleLogforCommand(interaction: CommandInteraction) {
-  if (
-    !interaction.inGuild() ||
-    !interaction.member ||
-    typeof interaction.member.permissions === 'string' ||
-    !interaction.member.permissions.has(PermissionFlagsBits.Administrator)
-  ) {
+  if (!interaction.inGuild() || !hasAdminPermission(interaction)) {
     await interaction.reply({
       content: 'You need Administrator permissions to use this command.',
       flags: MessageFlags.Ephemeral,
@@ -46,26 +47,10 @@ export async function handleLogforCommand(interaction: CommandInteraction) {
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const doseOption = interaction.options.get('dose_mg');
-  const medicationOption = interaction.options.get('medication');
-  const performedAtOption = interaction.options.get('performed_at');
-  const rawUnitsOption = interaction.options.get('raw_units');
-  const doseMg =
-    doseOption && typeof doseOption.value === 'number'
-      ? doseOption.value
-      : null;
-  const medication =
-    medicationOption && typeof medicationOption.value === 'string'
-      ? medicationOption.value
-      : null;
-  const performedAt =
-    performedAtOption && typeof performedAtOption.value === 'string'
-      ? performedAtOption.value
-      : null;
-  const rawUnits =
-    rawUnitsOption && typeof rawUnitsOption.value === 'number'
-      ? rawUnitsOption.value
-      : null;
+  const doseMg = getOptionNumber(interaction, 'dose_mg');
+  const medication = getOptionString(interaction, 'medication');
+  const performedAt = getOptionString(interaction, 'performed_at');
+  const rawUnits = getOptionNumber(interaction, 'raw_units');
 
   try {
     const defaults = await getGlobalSettings();
@@ -75,7 +60,7 @@ export async function handleLogforCommand(interaction: CommandInteraction) {
       : null;
     const record = await createInjectionRecord(targetUser.id, {
       medication: medication ?? defaults?.medication ?? null,
-      doseMg: doseMg ?? (defaults?.dose_mg ?? null),
+      doseMg: doseMg ?? defaults?.dose_mg ?? null,
       performedAt: performedAtDate ?? undefined,
       rawUnits,
       adminUserId: interaction.user.id,
@@ -90,10 +75,16 @@ export async function handleLogforCommand(interaction: CommandInteraction) {
         targetUserId: targetUser.id,
         action: 'logfor',
         logId: record.id,
-        details: `Dose ${record.dose_mg ?? 'n/a'} mg, units ${record.raw_units ?? 'n/a'}, performed_at ${record.performed_at ?? 'n/a'}`,
+        details: `Dose ${record.dose_mg ?? 'n/a'} mg, units ${
+          record.raw_units ?? 'n/a'
+        }, performed_at ${record.performed_at ?? 'n/a'}`,
       });
       await interaction.editReply(
-        `Injection recorded for ${targetUser.username}: **${record.leg} leg** on **${record.date}**${record.medication ? ` | Medication: ${record.medication}` : ''}${
+        `Injection recorded for ${targetUser.username}: **${
+          record.leg
+        } leg** on **${record.date}**${
+          record.medication ? ` | Medication: ${record.medication}` : ''
+        }${
           record.dose_mg !== null && record.dose_mg !== undefined
             ? ` | Dose: ${record.dose_mg} mg`
             : ''

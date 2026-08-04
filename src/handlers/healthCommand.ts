@@ -1,15 +1,11 @@
 import type { CommandInteraction } from 'discord.js';
-import { MessageFlags, PermissionFlagsBits } from 'discord.js';
+import { MessageFlags } from 'discord.js';
 import { pingDatabase } from '../database';
 import { getSchedulerStatus } from '../scheduler';
+import { hasAdminPermission } from '../utils/permissions';
 
 export async function handleHealthCommand(interaction: CommandInteraction) {
-  if (
-    !interaction.inGuild() ||
-    !interaction.member ||
-    typeof interaction.member.permissions === 'string' ||
-    !interaction.member.permissions.has(PermissionFlagsBits.Administrator)
-  ) {
+  if (!interaction.inGuild() || !hasAdminPermission(interaction)) {
     await interaction.reply({
       content: 'Admin only.',
       flags: MessageFlags.Ephemeral,

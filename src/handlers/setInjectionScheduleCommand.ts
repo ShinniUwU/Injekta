@@ -1,11 +1,13 @@
 // src/handlers/setInjectionScheduleCommand.ts
 import type { CommandInteraction } from 'discord.js'; // Import type
-import { MessageFlags, PermissionFlagsBits } from 'discord.js'; // Import MessageFlags
+import { MessageFlags } from 'discord.js'; // Import MessageFlags
 import type { GlobalSettings } from '../database';
 import { setGlobalSettings, getGlobalSettings } from '../database';
 import logger from '../logger';
 import { isValidTimeZone } from '../time';
 import { getAnchorDateTime } from '../time';
+import { hasAdminPermission } from '../utils/permissions';
+import { getOptionNumber, getOptionString } from '../utils/options';
 
 const dayNameToNumber: { [key: string]: number } = {
   /* ... as before ... */ sunday: 0,
@@ -29,11 +31,7 @@ export async function handleSetInjectionScheduleCommand(
     });
     return;
   }
-  if (
-    !interaction.member ||
-    typeof interaction.member.permissions === 'string' ||
-    !interaction.member.permissions.has(PermissionFlagsBits.Administrator)
-  ) {
+  if (!hasAdminPermission(interaction)) {
     // Use flags for reply
     await interaction.reply({
       content:
@@ -45,10 +43,6 @@ export async function handleSetInjectionScheduleCommand(
 
   const dayOption = interaction.options.get('day', true);
   const timeOption = interaction.options.get('time', true);
-  const timezoneOption = interaction.options.get('timezone');
-  const intervalOption = interaction.options.get('interval_days');
-  const medicationOption = interaction.options.get('medication');
-  const doseOption = interaction.options.get('dose_mg');
 
   if (
     typeof dayOption.value !== 'string' ||
@@ -64,8 +58,7 @@ export async function handleSetInjectionScheduleCommand(
 
   const dayName = dayOption.value.toLowerCase();
   const time = timeOption.value;
-  const timezone =
-    typeof timezoneOption?.value === 'string' ? timezoneOption.value : 'UTC';
+  const timezone = getOptionString(interaction, 'timezone') ?? 'UTC';
 
   if (!isValidTimeZone(timezone)) {
     await interaction.reply({
@@ -96,10 +89,7 @@ export async function handleSetInjectionScheduleCommand(
     return;
   }
 
-  const interval_days =
-    intervalOption && typeof intervalOption.value === 'number'
-      ? intervalOption.value
-      : 7;
+  const interval_days = getOptionNumber(interaction, 'interval_days') ?? 7;
   if (interval_days <= 0 || interval_days > 30) {
     await interaction.reply({
       content: 'Interval must be between 1 and 30 days.',
@@ -108,14 +98,8 @@ export async function handleSetInjectionScheduleCommand(
     return;
   }
 
-  const medication =
-    medicationOption && typeof medicationOption.value === 'string'
-      ? medicationOption.value
-      : null;
-  const dose_mg =
-    doseOption && typeof doseOption.value === 'number'
-      ? doseOption.value
-      : null;
+  const medication = getOptionString(interaction, 'medication');
+  const dose_mg = getOptionNumber(interaction, 'dose_mg');
 
   const anchor = getAnchorDateTime(injection_day, time, timezone);
   if (!anchor) {
@@ -156,9 +140,11 @@ export async function handleSetInjectionScheduleCommand(
     try {
       await triggerReschedule();
       await interaction.editReply(
-        `Injection schedule updated to ${dayOption.value} at ${time} (${timezone}), every ${interval_days} day(s). The scheduler has been updated.${medication ? ` Medication: ${medication}.` : ''}${
-          dose_mg ? ` Default dose: ${dose_mg} mg.` : ''
-        }`,
+        `Injection schedule updated to ${
+          dayOption.value
+        } at ${time} (${timezone}), every ${interval_days} day(s). The scheduler has been updated.${
+          medication ? ` Medication: ${medication}.` : ''
+        }${dose_mg ? ` Default dose: ${dose_mg} mg.` : ''}`,
       );
       logger.info('Scheduler successfully updated following schedule change.');
     } catch (rescheduleError) {

@@ -17,6 +17,7 @@ import { createInjectionRecord, getGlobalSettings } from '../database';
 import { config } from '../config';
 import logger from '../logger';
 import { parseUserDateTimeInput } from '../time';
+import { getOptionNumber, getOptionString } from '../utils/options';
 
 export async function handleInjectionCommand(
   interaction: CommandInteraction,
@@ -38,27 +39,10 @@ export async function handleInjectionCommand(
     return;
   }
 
-  const doseOption = interaction.options.get('dose_mg');
-  const medicationOption = interaction.options.get('medication');
-  const performedAtOption = interaction.options.get('performed_at');
-  const rawUnitsOption = interaction.options.get('raw_units');
-
-  const doseMg =
-    doseOption && typeof doseOption.value === 'number'
-      ? doseOption.value
-      : null;
-  const medication =
-    medicationOption && typeof medicationOption.value === 'string'
-      ? medicationOption.value
-      : null;
-  const performedAt =
-    performedAtOption && typeof performedAtOption.value === 'string'
-      ? performedAtOption.value
-      : null;
-  const rawUnits =
-    rawUnitsOption && typeof rawUnitsOption.value === 'number'
-      ? rawUnitsOption.value
-      : null;
+  const doseMg = getOptionNumber(interaction, 'dose_mg');
+  const medication = getOptionString(interaction, 'medication');
+  const performedAt = getOptionString(interaction, 'performed_at');
+  const rawUnits = getOptionNumber(interaction, 'raw_units');
 
   // Use flags for deferReply
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -133,13 +117,15 @@ export async function handleInjectionCommand(
       : null;
     const record = await createInjectionRecord(interaction.user.id, {
       medication: medication ?? defaults?.medication ?? null,
-      doseMg: doseMg ?? (defaults?.dose_mg ?? null),
+      doseMg: doseMg ?? defaults?.dose_mg ?? null,
       performedAt: performedAtDate ?? undefined,
       rawUnits,
     });
 
     if (record) {
-      const medLabel = record.medication ? `\nMedication: **${record.medication}**` : '';
+      const medLabel = record.medication
+        ? `\nMedication: **${record.medication}**`
+        : '';
       const doseLabel =
         record.dose_mg !== null && record.dose_mg !== undefined
           ? `\nDose: **${record.dose_mg} mg**`

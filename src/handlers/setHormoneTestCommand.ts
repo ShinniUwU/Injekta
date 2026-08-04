@@ -1,21 +1,18 @@
 // src/handlers/setHormoneTestCommand.ts
 import type { CommandInteraction } from 'discord.js';
-import { MessageFlags, PermissionFlagsBits } from 'discord.js';
+import { MessageFlags } from 'discord.js';
 import type { GlobalSettings } from '../database';
 import { getGlobalSettings, setGlobalSettings } from '../database';
 import { isValidTimeZone } from '../time';
 import { DateTime } from 'luxon';
 import logger from '../logger';
+import { hasAdminPermission } from '../utils/permissions';
+import { getOptionNumber, getOptionString } from '../utils/options';
 
 export async function handleSetHormoneTestCommand(
   interaction: CommandInteraction,
 ) {
-  if (
-    !interaction.inGuild() ||
-    !interaction.member ||
-    typeof interaction.member.permissions === 'string' ||
-    !interaction.member.permissions.has(PermissionFlagsBits.Administrator)
-  ) {
+  if (!interaction.inGuild() || !hasAdminPermission(interaction)) {
     await interaction.reply({
       content: 'You need Administrator permissions to use this command.',
       flags: MessageFlags.Ephemeral,
@@ -23,14 +20,7 @@ export async function handleSetHormoneTestCommand(
     return;
   }
 
-  const startDateOpt = interaction.options.get('start_date');
-  const intervalOpt = interaction.options.get('interval_days');
-  const timezoneOpt = interaction.options.get('timezone');
-
-  const interval_days =
-    intervalOpt && typeof intervalOpt.value === 'number'
-      ? intervalOpt.value
-      : 30;
+  const interval_days = getOptionNumber(interaction, 'interval_days') ?? 30;
   if (interval_days <= 0) {
     await interaction.reply({
       content: 'Interval must be at least 1 day.',
@@ -39,10 +29,7 @@ export async function handleSetHormoneTestCommand(
     return;
   }
 
-  const timezone =
-    timezoneOpt && typeof timezoneOpt.value === 'string'
-      ? timezoneOpt.value
-      : undefined;
+  const timezone = getOptionString(interaction, 'timezone') ?? undefined;
   const tzValid = timezone ? isValidTimeZone(timezone) : true;
   if (!tzValid) {
     await interaction.reply({
@@ -53,9 +40,10 @@ export async function handleSetHormoneTestCommand(
     return;
   }
 
+  const startDate = getOptionString(interaction, 'start_date');
   let startIso: string | null = null;
-  if (startDateOpt && typeof startDateOpt.value === 'string') {
-    const parsed = DateTime.fromISO(startDateOpt.value, {
+  if (startDate) {
+    const parsed = DateTime.fromISO(startDate, {
       zone: timezone ?? 'UTC',
     });
     if (!parsed.isValid) {
@@ -68,7 +56,9 @@ export async function handleSetHormoneTestCommand(
     }
     startIso = parsed.toISO();
   } else {
-    startIso = DateTime.now().setZone(timezone ?? 'UTC').toISO();
+    startIso = DateTime.now()
+      .setZone(timezone ?? 'UTC')
+      .toISO();
   }
 
   if (!startIso) {
@@ -100,10 +90,16 @@ export async function handleSetHormoneTestCommand(
   const success = await setGlobalSettings(newSettings);
   if (success) {
     await interaction.editReply(
-      `Hormone test reminder set. Start: ${startIso} (${timezone ?? 'UTC'}), interval: ${interval_days} day(s).`,
+      `Hormone test reminder set. Start: ${startIso} (${
+        timezone ?? 'UTC'
+      }), interval: ${interval_days} day(s).`,
     );
     logger.info(
-      `Hormone test reminder updated by ${interaction.user.tag}: start ${startIso}, interval ${interval_days}, tz ${timezone ?? 'UTC'}.`,
+      `Hormone test reminder updated by ${
+        interaction.user.tag
+      }: start ${startIso}, interval ${interval_days}, tz ${
+        timezone ?? 'UTC'
+      }.`,
     );
   } else {
     await interaction.editReply(

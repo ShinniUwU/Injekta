@@ -1,6 +1,7 @@
 // src/handlers/convertUnitsCommand.ts
 import type { CommandInteraction } from 'discord.js';
 import { EmbedBuilder, MessageFlags } from 'discord.js';
+import { getOptionNumber } from '../utils/options';
 
 const UNITS_PER_ML = 100; // Common insulin-style syringes
 
@@ -9,19 +10,15 @@ export async function handleConvertUnitsCommand(
 ) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const unitsOption = interaction.options.get('units');
-  const concentrationOption = interaction.options.get('concentration_mg_per_ml');
+  const units = getOptionNumber(interaction, 'units');
+  const concentration = getOptionNumber(interaction, 'concentration_mg_per_ml');
 
-  const units =
-    unitsOption && typeof unitsOption.value === 'number'
-      ? unitsOption.value
-      : null;
-  const concentration =
-    concentrationOption && typeof concentrationOption.value === 'number'
-      ? concentrationOption.value
-      : null;
-
-  if (units === null || concentration === null || units <= 0 || concentration <= 0) {
+  if (
+    units === null ||
+    concentration === null ||
+    units <= 0 ||
+    concentration <= 0
+  ) {
     await interaction.editReply(
       'Please provide positive numbers for units and concentration (mg/mL).',
     );
