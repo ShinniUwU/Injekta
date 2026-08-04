@@ -39,7 +39,7 @@ export async function handleHelpCommand(interaction: CommandInteraction) {
       {
         name: 'Reminders',
         value:
-          '/nextinjection tells you how long you have. Admins can set /setinjectionschedule for shot reminders and /sethormonetest for lab check-ins.',
+          '/nextinjection tells you how long you have. Admins can set /setinjectionschedule for shot reminders and /sethormonetest for lab check-ins. If you miss a shot, I will ping you every hour for up to 12 hours until you log it; use /snooze <hours> to push that back if you are busy.',
       },
       {
         name: 'What I store',

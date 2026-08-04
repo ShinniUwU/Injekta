@@ -18,14 +18,23 @@ import {
 import { DateTime } from 'luxon';
 
 const MAX_TIMEOUT = 2 ** 31 - 1;
+const NAG_INTERVAL_HOURS = 1;
+const NAG_CAP_HOURS = 12;
 
 let promptTimeout: NodeJS.Timeout | null = null;
 let reminderTimeout: NodeJS.Timeout | null = null;
 let testReminderTimeout: NodeJS.Timeout | null = null;
+let nagTimeout: NodeJS.Timeout | null = null;
+let currentNagTick: (() => Promise<void>) | null = null;
+let nagDeadline: DateTime | null = null;
 let currentClient: Client | null = null;
 let currentSettings: GlobalSettings | null = null;
 let nextPromptTarget: DateTime | null = null;
 let nextReminderTarget: DateTime | null = null;
+
+function ownerMention(): string | undefined {
+  return config.botOwnerId ? `<@${config.botOwnerId}>` : undefined;
+}
 
 async function fetchChannelWithRetry(
   client: Client,
@@ -69,6 +78,25 @@ function clearScheduled() {
     testReminderTimeout = null;
     logger.info('Cleared existing hormone test reminder timeout.');
   }
+  if (nagTimeout) {
+    clearTimeout(nagTimeout);
+    nagTimeout = null;
+    currentNagTick = null;
+    nagDeadline = null;
+    logger.info('Cleared existing injection nag timeout.');
+  }
+}
+
+export function snoozeNag(hours: number): 'snoozed' | 'no-active-nag' {
+  if (!nagTimeout || !currentNagTick) return 'no-active-nag';
+  clearTimeout(nagTimeout);
+  if (nagDeadline) {
+    nagDeadline = nagDeadline.plus({ hours });
+  }
+  const tick = currentNagTick;
+  nagTimeout = setTimeout(() => void tick(), hours * 60 * 60 * 1000);
+  logger.info(`Injection nag snoozed for ${hours}h.`);
+  return 'snoozed';
 }
 
 function scheduleTimeout(
@@ -185,7 +213,7 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
           )
           .setColor(0xe67e22)
           .setTimestamp();
-        await channel.send({ embeds: [catchupEmbed] });
+        await channel.send({ content: ownerMention(), embeds: [catchupEmbed] });
         logger.info('Sent catch-up injection reminder.');
       }
       await updateSchedulerRunTimes(new Date().toISOString(), undefined);
@@ -259,7 +287,7 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
         )
         .setTimestamp();
 
-      await channel.send({ embeds: [promptEmbed] }); // Line 87 area
+      await channel.send({ content: ownerMention(), embeds: [promptEmbed] }); // Line 87 area
       logger.info(`Sent injection prompt to channel ${channelId}.`); // Added for clarity
       await updateSchedulerRunTimes(new Date().toISOString(), undefined);
     } catch (error) {
@@ -268,6 +296,70 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
     } // Closing brace for catch
     // After prompt, schedule next cycle
     await scheduleNext();
+    startNagLoop();
+  };
+
+  const sendNagPing = async () => {
+    const latestInjection = await getLatestInjectionDateTime(timezone);
+    if (latestInjection && latestInjection >= previousInjection) {
+      logger.info('Stopping injection nag; injection has been logged.');
+      nagTimeout = null;
+      currentNagTick = null;
+      nagDeadline = null;
+      return;
+    }
+
+    const now = DateTime.now().setZone(timezone);
+    if (!nagDeadline || now >= nagDeadline) {
+      logger.info('Injection nag cap reached; giving up until next cycle.');
+      nagTimeout = null;
+      currentNagTick = null;
+      nagDeadline = null;
+      return;
+    }
+
+    try {
+      const channel = await fetchChannelWithRetry(client, channelId, 2, 1500);
+      if (channel) {
+        const medLabel =
+          settings.medication || settings.medication === ''
+            ? settings.medication
+            : 'Injection';
+
+        const nagEmbed = new EmbedBuilder()
+          .setTitle(`${medLabel} still not logged`)
+          .setDescription(
+            `This is still unlogged. Use \`/injection\` when you can, or \`/snooze <hours>\` if you need more time.`,
+          )
+          .setColor(0xe74c3c)
+          .setTimestamp();
+
+        await channel.send({ content: ownerMention(), embeds: [nagEmbed] });
+        logger.info(`Sent hourly injection nag to channel ${channelId}.`);
+      }
+    } catch (error) {
+      logger.error('Error sending injection nag:', error);
+    }
+
+    nagTimeout = setTimeout(
+      () => void sendNagPing(),
+      NAG_INTERVAL_HOURS * 60 * 60 * 1000,
+    );
+  };
+
+  const startNagLoop = () => {
+    if (nagTimeout) return;
+    nagDeadline = DateTime.now().setZone(timezone).plus({
+      hours: NAG_CAP_HOURS,
+    });
+    currentNagTick = sendNagPing;
+    nagTimeout = setTimeout(
+      () => void sendNagPing(),
+      NAG_INTERVAL_HOURS * 60 * 60 * 1000,
+    );
+    logger.info(
+      `Started hourly injection nag, capped at ${NAG_CAP_HOURS}h (until ${nagDeadline.toISO()}).`,
+    );
   };
 
   const sendReminder = async () => {
@@ -313,7 +405,7 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
         )
         .setTimestamp();
 
-      await channel.send({ embeds: [reminderEmbed] });
+      await channel.send({ content: ownerMention(), embeds: [reminderEmbed] });
       logger.info(`Sent injection reminder to channel ${channelId}.`);
       await updateSchedulerRunTimes(new Date().toISOString(), undefined);
     } catch (error) {
@@ -367,7 +459,7 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
         .setColor(0x8e44ad)
         .setTimestamp();
 
-      await channel.send({ embeds: [testEmbed] });
+      await channel.send({ content: ownerMention(), embeds: [testEmbed] });
       logger.info(`Sent hormone test reminder to channel ${channelId}.`);
       await updateSchedulerRunTimes(undefined, new Date().toISOString());
     } catch (error) {
@@ -408,7 +500,7 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
             )
             .setColor(0x8e44ad)
             .setTimestamp();
-          await channel.send({ embeds: [testEmbed] });
+          await channel.send({ content: ownerMention(), embeds: [testEmbed] });
           await updateSchedulerRunTimes(undefined, new Date().toISOString());
         } else {
           logger.error(`Designated channel ${channelId} not found for test catch-up reminder.`);
@@ -434,6 +526,8 @@ export function getSchedulerStatus() {
     reminderScheduled: Boolean(reminderTimeout),
     nextPromptISO: nextPromptTarget?.toISO() ?? null,
     nextReminderISO: nextReminderTarget?.toISO() ?? null,
+    nagActive: Boolean(nagTimeout),
+    nagDeadlineISO: nagDeadline?.toISO() ?? null,
     timezone: currentSettings?.timezone ?? null,
   };
 }

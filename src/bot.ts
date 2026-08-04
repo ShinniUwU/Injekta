@@ -21,6 +21,7 @@ import { handleSetupCheckCommand } from './handlers/setupCheckCommand';
 import { handleUpdateCheckCommand } from './handlers/updateCheckCommand';
 import { handleTimeCheckCommand } from './handlers/timeCheckCommand';
 import { handleHealthCommand } from './handlers/healthCommand';
+import { handleSnoozeCommand } from './handlers/snoozeCommand';
 import { notifyIfOutdated } from './versionCheck';
 
 const client = new Client({
@@ -108,6 +109,9 @@ client.on('interactionCreate', async (interaction) => {
         break;
       case 'health':
         await handleHealthCommand(interaction);
+        break;
+      case 'snooze':
+        await handleSnoozeCommand(interaction);
         break;
       default:
         await interaction.reply({

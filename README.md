@@ -10,7 +10,8 @@
 - **Automatic leg alternation** — always knows whether Right or Left is next based on your last log.
 - **Log history** — `/checklogs` shows your last 5 entries with dates, leg, medication, and dose.
 - **Stats** — `/stats` shows total injections logged and current streak.
-- **Reminders** — 1-hour warning + on-time prompt posted in the designated channel, including medication and dose.
+- **Reminders** — 1-hour warning + on-time prompt posted in the designated channel, including medication and dose. Reminders tag `BOT_OWNER_ID` if set.
+- **Injection nag** — if the on-time prompt goes unlogged, pings hourly for up to 12 hours; `/snooze <hours>` pushes it back.
 - **Catch-up reminders** — if the bot was offline and missed a scheduled reminder, it sends one on restart.
 - **Hormone test reminders** — `/sethormonetest` sets recurring E/T lab reminders at a custom interval.
 - **Dosing helper** — `/convertunits` converts raw syringe units to mg given a vial concentration.
@@ -140,6 +141,7 @@ The scheduler re-reads all settings from the database on startup and picks up ex
 | `/injection [dose_mg] [medication] [performed_at] [raw_units]` | Log an injection | Everyone |
 | `/checklogs [user]` | View last 5 injection logs | Everyone (admin for others) |
 | `/nextinjection` | Show when the next injection is due | Everyone |
+| `/snooze <hours>` | Push the current injection nag back by N hours | Everyone |
 | `/stats [user]` | Total logs and streak | Everyone (admin for others) |
 | `/deletemylog [log_id]` | Delete your latest log or a specific one by ID | Everyone |
 | `/convertunits <units> <concentration_mg_per_ml>` | Convert syringe units to mg | Everyone |

@@ -274,6 +274,18 @@ export async function refreshCommands(
       )
       .toJSON(),
     new SlashCommandBuilder()
+      .setName('snooze')
+      .setDescription('Push the current injection nag back if you are unavailable.')
+      .addIntegerOption((option) =>
+        option
+          .setName('hours')
+          .setDescription('Hours to snooze the nag for (1-24)')
+          .setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(24),
+      )
+      .toJSON(),
+    new SlashCommandBuilder()
       .setName('setupcheck')
       .setDescription('Admin: quick checklist to verify config and database.')
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
