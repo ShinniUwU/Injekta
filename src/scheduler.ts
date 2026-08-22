@@ -216,7 +216,9 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
         await channel.send({ content: ownerMention(), embeds: [catchupEmbed] });
         logger.info('Sent catch-up injection reminder.');
       }
-      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
+      const catchupRunIso = new Date().toISOString();
+      await updateSchedulerRunTimes(catchupRunIso, undefined);
+      settings.last_run_at = catchupRunIso;
     } catch (err) {
       logger.error('Failed to send catch-up reminder', err);
     }
@@ -252,7 +254,9 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
       logger.info(
         `Skipping prompt; latest injection at ${latestInjection.toISO()} already logged for this interval.`,
       );
-      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
+      const skipRunIso = new Date().toISOString();
+      await updateSchedulerRunTimes(skipRunIso, undefined);
+      settings.last_run_at = skipRunIso;
       await scheduleNext();
       return;
     }
@@ -289,7 +293,9 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
 
       await channel.send({ content: ownerMention(), embeds: [promptEmbed] }); // Line 87 area
       logger.info(`Sent injection prompt to channel ${channelId}.`); // Added for clarity
-      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
+      const promptRunIso = new Date().toISOString();
+      await updateSchedulerRunTimes(promptRunIso, undefined);
+      settings.last_run_at = promptRunIso;
     } catch (error) {
       // Closing brace for try, opening for catch
       logger.error('Error in injection prompt job execution:', error);
@@ -370,7 +376,9 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
       logger.info(
         `Skipping reminder; latest injection at ${latestInjection.toISO()} already logged for this interval.`,
       );
-      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
+      const skipReminderRunIso = new Date().toISOString();
+      await updateSchedulerRunTimes(skipReminderRunIso, undefined);
+      settings.last_run_at = skipReminderRunIso;
       await scheduleNext();
       return;
     }
@@ -407,7 +415,9 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
 
       await channel.send({ content: ownerMention(), embeds: [reminderEmbed] });
       logger.info(`Sent injection reminder to channel ${channelId}.`);
-      await updateSchedulerRunTimes(new Date().toISOString(), undefined);
+      const reminderRunIso = new Date().toISOString();
+      await updateSchedulerRunTimes(reminderRunIso, undefined);
+      settings.last_run_at = reminderRunIso;
     } catch (error) {
       logger.error('Error in injection reminder job execution:', error);
     }
@@ -461,7 +471,9 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
 
       await channel.send({ content: ownerMention(), embeds: [testEmbed] });
       logger.info(`Sent hormone test reminder to channel ${channelId}.`);
-      await updateSchedulerRunTimes(undefined, new Date().toISOString());
+      const testRunIso = new Date().toISOString();
+      await updateSchedulerRunTimes(undefined, testRunIso);
+      settings.test_last_run_at = testRunIso;
     } catch (error) {
       logger.error('Error in hormone test reminder execution:', error);
     }
@@ -501,7 +513,9 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
             .setColor(0x8e44ad)
             .setTimestamp();
           await channel.send({ content: ownerMention(), embeds: [testEmbed] });
-          await updateSchedulerRunTimes(undefined, new Date().toISOString());
+          const testCatchupRunIso = new Date().toISOString();
+          await updateSchedulerRunTimes(undefined, testCatchupRunIso);
+          settings.test_last_run_at = testCatchupRunIso;
         } else {
           logger.error(`Designated channel ${channelId} not found for test catch-up reminder.`);
         }
