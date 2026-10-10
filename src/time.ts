@@ -12,6 +12,26 @@ export function isValidTimeZone(zone: string): boolean {
   return IANAZone.isValidZone(zone);
 }
 
+// Step the anchor forward by whole intervals until it is strictly after now.
+// Uses calendar days so a DST change can't leave the result at or before now.
+function advancePastNow(
+  anchor: DateTime,
+  intervalDays: number,
+  now: DateTime,
+): DateTime {
+  if (anchor > now) return anchor;
+  let intervals = Math.max(
+    1,
+    Math.ceil(now.diff(anchor, 'days').days / intervalDays),
+  );
+  let candidate = anchor.plus({ days: intervalDays * intervals });
+  while (candidate <= now) {
+    intervals += 1;
+    candidate = anchor.plus({ days: intervalDays * intervals });
+  }
+  return candidate;
+}
+
 function toLuxonWeekday(injectionDay: number): number {
   // injection_day is 0 (Sunday) to 6 (Saturday); Luxon uses 1 (Mon) to 7 (Sun)
   return injectionDay === 0 ? 7 : injectionDay;
@@ -87,13 +107,7 @@ export function getNextInjectionDateTime(
 
   if (!anchor || !anchor.isValid) return null;
 
-  let candidate = anchor;
-  if (candidate <= zonedNow) {
-    const diffHours = zonedNow.diff(candidate, 'hours').hours;
-    const intervalsPassed = Math.ceil(diffHours / (intervalDays * 24));
-    candidate = candidate.plus({ days: intervalDays * intervalsPassed });
-  }
-  return candidate;
+  return advancePastNow(anchor, intervalDays, zonedNow);
 }
 
 export function getNextFromAnchor(
@@ -107,13 +121,7 @@ export function getNextFromAnchor(
   const anchor = DateTime.fromISO(anchorIso, { zone });
   if (!anchor.isValid) return null;
   const zonedNow = now.setZone(zone);
-  let candidate = anchor;
-  if (candidate <= zonedNow) {
-    const diffHours = zonedNow.diff(candidate, 'hours').hours;
-    const intervalsPassed = Math.ceil(diffHours / (intervalDays * 24));
-    candidate = candidate.plus({ days: intervalDays * intervalsPassed });
-  }
-  return candidate;
+  return advancePastNow(anchor, intervalDays, zonedNow);
 }
 
 function toCronDayFromLuxonWeekday(weekday: number): number {
@@ -142,8 +150,8 @@ export function formatDateTimeForDisplay(
     date instanceof Date
       ? DateTime.fromJSDate(date)
       : typeof date === 'string'
-        ? DateTime.fromISO(date, { zone: timezone })
-        : date;
+      ? DateTime.fromISO(date, { zone: timezone })
+      : date;
   const zoned = timezone ? dt.setZone(timezone) : dt;
   return zoned
     .setLocale(locale || 'en-US')
@@ -163,8 +171,8 @@ export function formatTimestampForDisplay(
     value instanceof Date
       ? DateTime.fromJSDate(value)
       : DateTime.isDateTime(value)
-        ? value
-        : DateTime.fromISO(value, { zone: timezone });
+      ? value
+      : DateTime.fromISO(value, { zone: timezone });
   if (!dt.isValid) return String(value);
   return dt
     .setZone(timezone || 'UTC')
@@ -172,11 +180,13 @@ export function formatTimestampForDisplay(
     .toLocaleString(DateTime.DATETIME_FULL);
 }
 
+// Returns null when the input can't be read, so callers can reject it
+// instead of silently logging "now".
 export function parseUserDateTimeInput(
   value: string,
   timezone: string,
   now: DateTime = DateTime.now(),
-): Date {
+): Date | null {
   const tz = isValidTimeZone(timezone) ? timezone : 'UTC';
   const attempts = [
     DateTime.fromISO(value, { zone: tz }),
@@ -192,5 +202,5 @@ export function parseUserDateTimeInput(
     }),
   ];
   const found = attempts.find((dt) => dt.isValid);
-  return (found ?? DateTime.fromJSDate(new Date())).toJSDate();
+  return found ? found.toJSDate() : null;
 }

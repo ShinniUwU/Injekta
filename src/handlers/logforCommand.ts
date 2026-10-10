@@ -9,7 +9,11 @@ import {
 import logger from '../logger';
 import { parseUserDateTimeInput } from '../time';
 import { hasAdminPermission } from '../utils/permissions';
-import { getOptionNumber, getOptionString } from '../utils/options';
+import {
+  getOptionLeg,
+  getOptionNumber,
+  getOptionString,
+} from '../utils/options';
 
 export async function handleLogforCommand(interaction: CommandInteraction) {
   if (!interaction.inGuild() || !hasAdminPermission(interaction)) {
@@ -51,6 +55,7 @@ export async function handleLogforCommand(interaction: CommandInteraction) {
   const medication = getOptionString(interaction, 'medication');
   const performedAt = getOptionString(interaction, 'performed_at');
   const rawUnits = getOptionNumber(interaction, 'raw_units');
+  const leg = getOptionLeg(interaction);
 
   try {
     const defaults = await getGlobalSettings();
@@ -58,12 +63,19 @@ export async function handleLogforCommand(interaction: CommandInteraction) {
     const performedAtDate = performedAt
       ? parseUserDateTimeInput(performedAt, tz)
       : null;
+    if (performedAt && !performedAtDate) {
+      await interaction.editReply(
+        `I couldn't read \`${performedAt}\` as a date. Try \`2026-10-10 14:00\` or \`2026-10-10\`.`,
+      );
+      return;
+    }
     const record = await createInjectionRecord(targetUser.id, {
       medication: medication ?? defaults?.medication ?? null,
       doseMg: doseMg ?? defaults?.dose_mg ?? null,
       performedAt: performedAtDate ?? undefined,
       rawUnits,
       adminUserId: interaction.user.id,
+      leg,
     });
 
     if (record) {

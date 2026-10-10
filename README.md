@@ -51,21 +51,22 @@ bun run prepare   # sets up Husky pre-commit hooks (optional)
 
 1. **Create a database and user** in your PostgreSQL instance:
 
-    ```sql
-    CREATE DATABASE injekta_db;
-    CREATE USER injekta_user WITH PASSWORD 'your_secure_password';
-    GRANT ALL PRIVILEGES ON DATABASE injekta_db TO injekta_user;
-    ```
+   ```sql
+   CREATE DATABASE injekta_db;
+   CREATE USER injekta_user WITH PASSWORD 'your_secure_password';
+   GRANT ALL PRIVILEGES ON DATABASE injekta_db TO injekta_user;
+   ```
 
 2. **Apply the schema:**
 
-    ```bash
-    psql -h localhost -p 5432 -U injekta_user -d injekta_db -f schema.sql
-    ```
+   ```bash
+   psql -h localhost -p 5432 -U injekta_user -d injekta_db -f schema.sql
+   ```
 
-    This creates the `injections`, `global_settings`, and `admin_actions` tables.
+   This creates the `injections`, `global_settings`, and `admin_actions` tables.
 
 > **Upgrading from an older schema?** If your `injection_date` column was stored as a `DD-MM-YYYY` string, migrate it before restarting:
+>
 > ```sql
 > ALTER TABLE injections
 >   ALTER COLUMN injection_date TYPE TIMESTAMPTZ
@@ -99,11 +100,13 @@ BOT_OWNER_ID=your_discord_user_id
 ## Running the Bot
 
 **Development:**
+
 ```bash
 bun run dev
 ```
 
 **Production (pm2):**
+
 ```bash
 npm install -g pm2
 pm2 start bun --name injekta -- run dev
@@ -113,6 +116,7 @@ pm2 stop injekta  # stop
 ```
 
 **First-run checklist:**
+
 1. Start the bot.
 2. Run `/setupcheck` in Discord to verify DB connection and channel access.
 3. Run `/setinjectionschedule` (admin) to configure the schedule — reminders and `/nextinjection` won't work until this is done.
@@ -136,24 +140,24 @@ The scheduler re-reads all settings from the database on startup and picks up ex
 
 ## Available Commands
 
-| Command | Description | Who |
-|---------|-------------|-----|
-| `/injection [dose_mg] [medication] [performed_at] [raw_units]` | Log an injection | Everyone |
-| `/checklogs [user]` | View last 5 injection logs | Everyone (admin for others) |
-| `/nextinjection` | Show when the next injection is due | Everyone |
-| `/snooze <hours>` | Push the current injection nag back by N hours | Everyone |
-| `/stats [user]` | Total logs and streak | Everyone (admin for others) |
-| `/deletemylog [log_id]` | Delete your latest log or a specific one by ID | Everyone |
-| `/convertunits <units> <concentration_mg_per_ml>` | Convert syringe units to mg | Everyone |
-| `/help` | Show command overview | Everyone |
-| `/timecheck` | Show current time in the configured timezone | Everyone |
-| `/health` | Check bot and database status | Everyone |
-| `/setinjectionschedule <day> <time> [timezone] [interval_days] [medication] [dose_mg]` | Configure the global injection schedule | Admin |
-| `/sethormonetest [start_date] [interval_days] [timezone]` | Configure hormone test reminders | Admin |
-| `/logfor <user> [dose_mg] [medication]` | Log an injection for another user | Admin |
-| `/admindeletelog <user> <log_id>` | Delete any user's log entry | Admin |
-| `/updatecheck` | Manually check for available git updates | Admin |
-| `/setupcheck` | Verify DB connection and channel config | Admin |
+| Command                                                                                | Description                                    | Who                         |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------- | --------------------------- |
+| `/injection [dose_mg] [medication] [performed_at] [raw_units]`                         | Log an injection                               | Everyone                    |
+| `/checklogs [user]`                                                                    | View last 5 injection logs                     | Everyone (admin for others) |
+| `/nextinjection`                                                                       | Show when the next injection is due            | Everyone                    |
+| `/snooze <hours>`                                                                      | Push the current injection nag back by N hours | Everyone                    |
+| `/stats [user]`                                                                        | Total logs and streak                          | Everyone (admin for others) |
+| `/deletemylog [log_id]`                                                                | Delete your latest log or a specific one by ID | Everyone                    |
+| `/convertunits <units> <concentration_mg_per_ml>`                                      | Convert syringe units to mg                    | Everyone                    |
+| `/help`                                                                                | Show command overview                          | Everyone                    |
+| `/timecheck`                                                                           | Show current time in the configured timezone   | Everyone                    |
+| `/health`                                                                              | Check bot and database status                  | Everyone                    |
+| `/setinjectionschedule <day> <time> [timezone] [interval_days] [medication] [dose_mg]` | Configure the global injection schedule        | Admin                       |
+| `/sethormonetest [start_date] [interval_days] [timezone]`                              | Configure hormone test reminders               | Admin                       |
+| `/logfor <user> [dose_mg] [medication]`                                                | Log an injection for another user              | Admin                       |
+| `/admindeletelog <user> <log_id>`                                                      | Delete any user's log entry                    | Admin                       |
+| `/updatecheck`                                                                         | Manually check for available git updates       | Admin                       |
+| `/setupcheck`                                                                          | Verify DB connection and channel config        | Admin                       |
 
 ## Development
 

@@ -7,7 +7,10 @@ export async function handleTimeCheckCommand(interaction: CommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const settings = await getGlobalSettings();
-  const tz = settings?.timezone && settings.timezone.trim() !== '' ? settings.timezone : 'UTC';
+  const tz =
+    settings?.timezone && settings.timezone.trim() !== ''
+      ? settings.timezone
+      : 'UTC';
 
   const serverNow = DateTime.now();
   const configuredNow = serverNow.setZone(tz);
@@ -15,7 +18,9 @@ export async function handleTimeCheckCommand(interaction: CommandInteraction) {
   const response = [
     `Server time: **${serverNow.toISO()}** (${serverNow.toFormat('ZZZZ')})`,
     `Configured timezone: **${tz}**`,
-    `Configured time now: **${configuredNow.isValid ? configuredNow.toISO() : 'invalid timezone'}**`,
+    `Configured time now: **${
+      configuredNow.isValid ? configuredNow.toISO() : 'invalid timezone'
+    }**`,
   ].join('\n');
 
   await interaction.editReply({ content: response });

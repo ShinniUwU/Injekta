@@ -22,6 +22,7 @@ import { handleUpdateCheckCommand } from './handlers/updateCheckCommand';
 import { handleTimeCheckCommand } from './handlers/timeCheckCommand';
 import { handleHealthCommand } from './handlers/healthCommand';
 import { handleSnoozeCommand } from './handlers/snoozeCommand';
+import { handleSetLegCommand } from './handlers/setLegCommand';
 import { notifyIfOutdated } from './versionCheck';
 
 const client = new Client({
@@ -51,7 +52,10 @@ client.once('ready', async () => {
     logger.info('Attempting to initialize scheduler...');
     await initializeScheduler(client);
   } catch (error) {
-    logger.error('Scheduler initialization failed; reminders will not fire:', error);
+    logger.error(
+      'Scheduler initialization failed; reminders will not fire:',
+      error,
+    );
   }
 
   void notifyIfOutdated(client);
@@ -110,6 +114,9 @@ client.on('interactionCreate', async (interaction) => {
       case 'health':
         await handleHealthCommand(interaction);
         break;
+      case 'setleg':
+        await handleSetLegCommand(interaction);
+        break;
       case 'snooze':
         await handleSnoozeCommand(interaction);
         break;
@@ -129,7 +136,7 @@ client.on('interactionCreate', async (interaction) => {
       await interaction
         .followUp({
           content: 'There was an error processing your command.',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         })
         .catch((e) => logger.error('Failed to follow up error', e));
     } else {

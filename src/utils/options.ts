@@ -15,3 +15,10 @@ export function getOptionString(
   const option = interaction.options.get(name);
   return option && typeof option.value === 'string' ? option.value : null;
 }
+
+export function getOptionLeg(
+  interaction: CommandInteraction,
+): 'Right' | 'Left' | null {
+  const value = getOptionString(interaction, 'leg');
+  return value === 'Right' || value === 'Left' ? value : null;
+}

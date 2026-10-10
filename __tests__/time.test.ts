@@ -6,6 +6,7 @@ import {
   getNextFromAnchor,
   describeTimeUntil,
   cronDayFromDateTime,
+  parseUserDateTimeInput,
 } from '../src/time';
 import type { GlobalSettings } from '../src/database';
 
@@ -76,6 +77,22 @@ describe('getNextInjectionDateTime', () => {
     expect(next?.toISO()).toBe('2026-08-10T09:00:00.000Z');
   });
 
+  it('lands strictly after now across a spring-forward DST change', () => {
+    // Anchor is before Europe/Berlin moves to summer time on 2026-03-29
+    const firedAt = DateTime.fromISO('2026-03-29T09:00:00.005', {
+      zone: 'Europe/Berlin',
+    });
+    const next = getNextInjectionDateTime(
+      {
+        ...baseSettings,
+        timezone: 'Europe/Berlin',
+        start_time: '2026-03-22T09:00:00+01:00',
+      },
+      firedAt,
+    );
+    expect(next?.toISO()).toBe('2026-04-05T09:00:00.000+02:00');
+  });
+
   it('returns null when start_time is missing', () => {
     const next = getNextInjectionDateTime(
       { ...baseSettings, start_time: null },
@@ -122,5 +139,19 @@ describe('cronDayFromDateTime', () => {
   it('maps Sunday to cron day 0', () => {
     const sunday = DateTime.fromISO('2026-08-02T10:00:00', { zone: 'utc' });
     expect(cronDayFromDateTime(sunday)).toBe(0);
+  });
+});
+
+describe('parseUserDateTimeInput', () => {
+  const now = DateTime.fromISO('2026-08-04T10:30:00', { zone: 'utc' });
+
+  it('parses a date and time in the given timezone', () => {
+    expect(
+      parseUserDateTimeInput('2026-08-01 14:00', 'UTC', now)?.toISOString(),
+    ).toBe('2026-08-01T14:00:00.000Z');
+  });
+
+  it('returns null for input it cannot read', () => {
+    expect(parseUserDateTimeInput('yesterday-ish', 'UTC', now)).toBeNull();
   });
 });

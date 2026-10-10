@@ -1,4 +1,8 @@
-import type { CommandInteraction, Message, MessageComponentInteraction } from 'discord.js';
+import type {
+  CommandInteraction,
+  Message,
+  MessageComponentInteraction,
+} from 'discord.js';
 import { ActionRowBuilder, ButtonBuilder, EmbedBuilder } from 'discord.js';
 import logger from '../logger';
 
@@ -28,7 +32,10 @@ export async function awaitConfirmation(params: {
     i.user.id === interaction.user.id;
 
   try {
-    const bi = await replyMessage.awaitMessageComponent({ filter, time: timeoutMs });
+    const bi = await replyMessage.awaitMessageComponent({
+      filter,
+      time: timeoutMs,
+    });
     await bi.deferUpdate();
     return bi.customId === confirmId ? 'confirmed' : 'cancelled';
   } catch (error) {

@@ -46,7 +46,8 @@ export async function handleAdminDeleteLogCommand(
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   // Call delete function
-  const result = await deleteLogById(logId); // Admin command doesn't need userId check here
+  // Only delete if the log belongs to the user the admin picked
+  const result = await deleteLogById(logId, targetUser.id);
 
   if (result.success && result.deletedRecord) {
     logger.info(
@@ -85,7 +86,7 @@ export async function handleAdminDeleteLogCommand(
       `Admin ${interaction.user.tag} failed to delete log ID ${logId} for user ${targetUser.tag}. Record might not exist.`,
     );
     await interaction.editReply(
-      `Failed to delete log entry #${logId} for ${targetUser.username}. Please ensure the Log ID is correct.`,
+      `Failed to delete log entry #${logId} for ${targetUser.username}. Please ensure the Log ID is correct and belongs to that user.`,
     );
   }
 }

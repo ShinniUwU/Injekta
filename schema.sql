@@ -79,7 +79,7 @@ CREATE INDEX IF NOT EXISTS idx_admin_actions_admin ON admin_actions(admin_user_i
 --   ADD COLUMN IF NOT EXISTS dose_mg NUMERIC(10,2),
 --   ADD COLUMN IF NOT EXISTS test_start_time TIMESTAMPTZ,
 --   ADD COLUMN IF NOT EXISTS test_interval_days NUMERIC(6,2) DEFAULT 30,
---   ADD COLUMN IF NOT EXISTS test_timezone VARCHAR(100) DEFAULT 'UTC';
+--   ADD COLUMN IF NOT EXISTS test_timezone VARCHAR(100) DEFAULT 'UTC',
 --   ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMPTZ,
 --   ADD COLUMN IF NOT EXISTS test_last_run_at TIMESTAMPTZ;
 

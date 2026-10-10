@@ -4,6 +4,7 @@ import type {
   CommandInteraction,
   Message,
   InteractionEditReplyOptions,
+  MessageComponentInteraction,
 } from 'discord.js';
 import {
   ActionRowBuilder,
@@ -12,12 +13,20 @@ import {
   EmbedBuilder,
   MessageFlags,
 } from 'discord.js';
-import { awaitConfirmation } from '../utils/awaitConfirm';
-import { createInjectionRecord, getGlobalSettings } from '../database';
+import {
+  createInjectionRecord,
+  getGlobalSettings,
+  getNextLeg,
+  suggestNextLeg,
+} from '../database';
 import { config } from '../config';
 import logger from '../logger';
 import { parseUserDateTimeInput } from '../time';
-import { getOptionNumber, getOptionString } from '../utils/options';
+import {
+  getOptionLeg,
+  getOptionNumber,
+  getOptionString,
+} from '../utils/options';
 
 export async function handleInjectionCommand(
   interaction: CommandInteraction,
@@ -43,13 +52,30 @@ export async function handleInjectionCommand(
   const medication = getOptionString(interaction, 'medication');
   const performedAt = getOptionString(interaction, 'performed_at');
   const rawUnits = getOptionNumber(interaction, 'raw_units');
+  const legOption = getOptionLeg(interaction);
 
   // Use flags for deferReply
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+  const defaults = await getGlobalSettings();
+  const tz = defaults?.timezone ?? 'UTC';
+  const performedAtDate = performedAt
+    ? parseUserDateTimeInput(performedAt, tz)
+    : null;
+  if (performedAt && !performedAtDate) {
+    await interaction.editReply(
+      `I couldn't read \`${performedAt}\` as a date. Try \`2026-10-10 14:00\` or \`2026-10-10\`.`,
+    );
+    return;
+  }
+  let leg =
+    legOption ??
+    (await suggestNextLeg(interaction.user.id, performedAtDate ?? new Date()));
+
   const interactionId = interaction.id;
   const confirmCustomId = `confirm_injection_${interactionId}`;
   const cancelCustomId = `cancel_injection_${interactionId}`;
+  const switchLegCustomId = `switch_leg_injection_${interactionId}`;
 
   const confirmationEmbed = new EmbedBuilder()
     // ... (rest of embed setup)
@@ -67,6 +93,14 @@ export async function handleInjectionCommand(
         interaction.user.displayAvatarURL() ?? client.user?.displayAvatarURL(),
     })
     .setTimestamp();
+  const setLegField = () =>
+    confirmationEmbed.setFields({
+      name: 'Leg',
+      value: `**${leg}**${
+        legOption ? '' : ' (picked by alternating from your last log)'
+      }`,
+    });
+  setLegField();
 
   const confirmButton = new ButtonBuilder()
     .setCustomId(confirmCustomId)
@@ -78,10 +112,16 @@ export async function handleInjectionCommand(
     .setLabel('Cancel')
     .setStyle(ButtonStyle.Secondary);
 
-  const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    confirmButton,
-    cancelButton,
-  );
+  const switchLegButton = new ButtonBuilder()
+    .setCustomId(switchLegCustomId)
+    .setStyle(ButtonStyle.Primary);
+  const buildRow = () =>
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      confirmButton,
+      switchLegButton.setLabel(`Switch to ${getNextLeg(leg)}`),
+      cancelButton,
+    );
+  const actionRow = buildRow();
 
   await interaction.editReply({
     embeds: [confirmationEmbed],
@@ -94,32 +134,50 @@ export async function handleInjectionCommand(
     .setDescription('Confirmation timed out or failed. Injection not recorded.')
     .setColor(0xe74c3c);
 
-  const result = await awaitConfirmation({
-    interaction,
-    replyMessage,
-    confirmId: confirmCustomId,
-    cancelId: cancelCustomId,
-    confirmButton,
-    cancelButton,
-    timeoutEmbed,
-  });
+  const filter = (i: MessageComponentInteraction) =>
+    [confirmCustomId, cancelCustomId, switchLegCustomId].includes(i.customId) &&
+    i.user.id === interaction.user.id;
 
-  if (result === 'timeout') return;
+  let result: 'confirmed' | 'cancelled' | 'timeout' = 'timeout';
+  while (result === 'timeout') {
+    let clicked: MessageComponentInteraction;
+    try {
+      clicked = await replyMessage.awaitMessageComponent({
+        filter,
+        time: 60000,
+      });
+    } catch {
+      [confirmButton, switchLegButton, cancelButton].forEach((b) =>
+        b.setDisabled(true),
+      );
+      await interaction
+        .editReply({ embeds: [timeoutEmbed], components: [buildRow()] })
+        .catch((e) => logger.error('Failed to edit reply after timeout:', e));
+      return;
+    }
+    if (clicked.customId === switchLegCustomId) {
+      leg = getNextLeg(leg);
+      setLegField();
+      await clicked.update({
+        embeds: [confirmationEmbed],
+        components: [buildRow()],
+      });
+      continue;
+    }
+    await clicked.deferUpdate();
+    result = clicked.customId === confirmCustomId ? 'confirmed' : 'cancelled';
+  }
 
   let replyOptions: InteractionEditReplyOptions = {};
 
   if (result === 'confirmed') {
     logger.info(`Injection confirmed by ${interaction.user.tag} via button.`);
-    const defaults = await getGlobalSettings();
-    const tz = defaults?.timezone ?? 'UTC';
-    const performedAtDate = performedAt
-      ? parseUserDateTimeInput(performedAt, tz)
-      : null;
     const record = await createInjectionRecord(interaction.user.id, {
       medication: medication ?? defaults?.medication ?? null,
       doseMg: doseMg ?? defaults?.dose_mg ?? null,
       performedAt: performedAtDate ?? undefined,
       rawUnits,
+      leg,
     });
 
     if (record) {

@@ -1,6 +1,7 @@
 // src/database.ts
-import { Pool } from 'pg';
-import type { QueryResult } from 'pg';
+import { Pool, types } from 'pg';
+import type { PoolClient, QueryResult } from 'pg';
+import { DateTime } from 'luxon';
 import { config } from './config';
 import logger from './logger';
 import { formatTimestampForDisplay } from './time';
@@ -34,6 +35,18 @@ export interface GlobalSettings {
   last_run_at: string | null;
   test_last_run_at: string | null;
 }
+
+// pg returns TIMESTAMPTZ as Date and NUMERIC as string by default, which doesn't
+// match the interfaces above. Normalize to ISO strings and numbers.
+const toIsoString = (value: string) => {
+  const dt = DateTime.fromSQL(value, { setZone: true });
+  return dt.isValid ? (dt.toUTC().toISO() as string) : value;
+};
+types.setTypeParser(types.builtins.TIMESTAMPTZ, toIsoString);
+types.setTypeParser(types.builtins.TIMESTAMP, toIsoString);
+types.setTypeParser(types.builtins.NUMERIC, (value: string) =>
+  parseFloat(value),
+);
 
 // --- Database Connection Pool ---
 let pool: Pool;
@@ -69,10 +82,11 @@ export async function getLastRecord(
   const params: string[] = [];
   let queryText = baseQuery;
   if (userId) {
-    queryText += ' WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1';
+    queryText +=
+      ' WHERE user_id = $1 ORDER BY performed_at DESC, created_at DESC LIMIT 1';
     params.push(userId);
   } else {
-    queryText += ' ORDER BY created_at DESC LIMIT 1';
+    queryText += ' ORDER BY performed_at DESC, created_at DESC LIMIT 1';
   }
   try {
     const result: QueryResult<InjectionRecord> = await pool.query(
@@ -133,47 +147,77 @@ export async function getAllUserRecords(
   }
 }
 
+async function withTransaction<T>(
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function enforceMaxFiveRecords(userId: string): Promise<void> {
   const maxRecords = 5;
   try {
-    await pool.query('BEGIN');
-    const findCutoffQuery = `
-            SELECT id FROM injections WHERE user_id = $1
-            ORDER BY created_at DESC OFFSET $2 LIMIT 1`;
-    const cutoffResult = await pool.query(findCutoffQuery, [
-      userId,
-      maxRecords - 1,
-    ]);
-    const cutoffId = cutoffResult.rows[0]?.id;
-    if (cutoffId) {
-      const getIdsToDeleteQuery = `
-                SELECT id FROM injections WHERE user_id = $1 AND created_at < (
-                    SELECT created_at FROM injections WHERE id = $2 )`;
-      const idsResult = await pool.query(getIdsToDeleteQuery, [
-        userId,
-        cutoffId,
-      ]);
-      const idsToDelete = idsResult.rows.map((row) => row.id);
-      if (idsToDelete.length > 0) {
-        const deleteQuery = 'DELETE FROM injections WHERE id = ANY($1::int[])';
-        const deleteResult = await pool.query(deleteQuery, [idsToDelete]);
-        logger.info(
-          `Deleted ${deleteResult.rowCount} old record(s) for user ${userId} to maintain max ${maxRecords}.`,
-        );
-      }
-    }
-    await pool.query('COMMIT');
-  } catch (error) {
-    await pool.query('ROLLBACK');
-    logger.error(
-      'PostgreSQL error enforcing max records, rolled back transaction',
-      { userId, pgError: error },
+    // Keep the 5 most recent injections by when they happened, not when they were logged.
+    const deleteResult = await pool.query(
+      `DELETE FROM injections WHERE user_id = $1 AND id NOT IN (
+         SELECT id FROM injections WHERE user_id = $1
+         ORDER BY performed_at DESC, created_at DESC, id DESC LIMIT $2)`,
+      [userId, maxRecords],
     );
+    if (deleteResult.rowCount) {
+      logger.info(
+        `Deleted ${deleteResult.rowCount} old record(s) for user ${userId} to maintain max ${maxRecords}.`,
+      );
+    }
+  } catch (error) {
+    logger.error('PostgreSQL error enforcing max records', {
+      userId,
+      pgError: error,
+    });
   }
 }
 
 export function getNextLeg(lastLeg?: string | null): 'Right' | 'Left' {
   return lastLeg === 'Right' ? 'Left' : 'Right';
+}
+
+// Most recent injection at or before `before`, so backdated logs alternate
+// against the injection that actually came before them.
+async function getRecordBefore(
+  userId: string,
+  before: Date,
+): Promise<InjectionRecord | null> {
+  const result: QueryResult<InjectionRecord> = await pool.query(
+    `SELECT * FROM injections WHERE user_id = $1 AND performed_at <= $2
+     ORDER BY performed_at DESC, created_at DESC LIMIT 1`,
+    [userId, before],
+  );
+  return result.rows[0] || null;
+}
+
+export async function suggestNextLeg(
+  userId: string,
+  performedAt: Date = new Date(),
+): Promise<'Right' | 'Left'> {
+  try {
+    return getNextLeg((await getRecordBefore(userId, performedAt))?.leg);
+  } catch (error) {
+    logger.error('PostgreSQL error suggesting next leg', {
+      userId,
+      pgError: error,
+    });
+    return getNextLeg(null);
+  }
 }
 
 export async function createInjectionRecord(
@@ -184,6 +228,7 @@ export async function createInjectionRecord(
     performedAt?: string | Date | null;
     rawUnits?: number | null;
     adminUserId?: string | null;
+    leg?: 'Right' | 'Left' | null;
   },
 ): Promise<{
   id: number;
@@ -195,8 +240,6 @@ export async function createInjectionRecord(
   raw_units: number | null;
 } | null> {
   try {
-    const lastRecord = await getLastRecord(userId);
-    const nextLeg = getNextLeg(lastRecord?.leg);
     const parsedDose =
       options?.doseMg === null || options?.doseMg === undefined
         ? null
@@ -220,6 +263,10 @@ export async function createInjectionRecord(
     } else {
       performedAtValue = new Date();
     }
+
+    const nextLeg =
+      options?.leg ??
+      getNextLeg((await getRecordBefore(userId, performedAtValue))?.leg);
 
     const insertQuery = `
             INSERT INTO injections (user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id)
@@ -336,48 +383,35 @@ export async function deleteLogById(
   userIdToCheck?: string,
 ): Promise<{ success: boolean; deletedRecord?: InjectionRecord }> {
   try {
-    await pool.query('BEGIN');
-    const selectQuery = 'SELECT * FROM injections WHERE id = $1';
-    const selectResult = await pool.query<InjectionRecord>(selectQuery, [
-      logId,
-    ]);
-    const recordToDelete = selectResult.rows[0];
-    if (!recordToDelete) {
-      await pool.query('ROLLBACK');
-      logger.warn('Attempted to delete non-existent log entry', {
-        logId,
-        userIdToCheck,
-      });
-      return { success: false };
-    }
-    if (userIdToCheck && recordToDelete.user_id !== userIdToCheck) {
-      await pool.query('ROLLBACK');
-      logger.warn(
-        'User attempted to delete log entry belonging to another user',
-        {
+    return await withTransaction(async (client) => {
+      const selectResult = await client.query<InjectionRecord>(
+        'SELECT * FROM injections WHERE id = $1 FOR UPDATE',
+        [logId],
+      );
+      const recordToDelete = selectResult.rows[0];
+      if (!recordToDelete) {
+        logger.warn('Attempted to delete non-existent log entry', {
+          logId,
+          userIdToCheck,
+        });
+        return { success: false };
+      }
+      if (userIdToCheck && recordToDelete.user_id !== userIdToCheck) {
+        logger.warn('Attempted to delete log entry belonging to another user', {
           logId,
           requestingUser: userIdToCheck,
           ownerUser: recordToDelete.user_id,
-        },
-      );
-      return { success: false };
-    }
-    const deleteQuery = 'DELETE FROM injections WHERE id = $1';
-    const deleteResult = await pool.query(deleteQuery, [logId]);
-    if (deleteResult.rowCount === 1) {
-      await pool.query('COMMIT');
+        });
+        return { success: false };
+      }
+      await client.query('DELETE FROM injections WHERE id = $1', [logId]);
       logger.info('Successfully deleted log entry', {
         logId,
         userId: recordToDelete.user_id,
       });
       return { success: true, deletedRecord: recordToDelete };
-    } else {
-      await pool.query('ROLLBACK');
-      logger.error('Failed to delete log entry after finding it', { logId });
-      return { success: false };
-    }
+    });
   } catch (error) {
-    await pool.query('ROLLBACK');
     logger.error('PostgreSQL error deleting log by ID', {
       logId,
       userIdToCheck,
@@ -391,43 +425,91 @@ export async function deleteLatestLogForUser(
   userId: string,
 ): Promise<{ success: boolean; deletedRecord?: InjectionRecord }> {
   try {
-    await pool.query('BEGIN');
-    const findLatestQuery = `
-            SELECT * FROM injections WHERE user_id = $1
-            ORDER BY created_at DESC, id DESC LIMIT 1`;
-    const findResult = await pool.query<InjectionRecord>(findLatestQuery, [
-      userId,
-    ]);
-    const latestRecord = findResult.rows[0];
-    if (!latestRecord) {
-      await pool.query('ROLLBACK');
-      logger.info('No logs found to delete for user', { userId });
-      return { success: false };
-    }
-    const deleteQuery = 'DELETE FROM injections WHERE id = $1';
-    const deleteResult = await pool.query(deleteQuery, [latestRecord.id]);
-    if (deleteResult.rowCount === 1) {
-      await pool.query('COMMIT');
+    return await withTransaction(async (client) => {
+      const findResult = await client.query<InjectionRecord>(
+        `SELECT * FROM injections WHERE user_id = $1
+         ORDER BY performed_at DESC, created_at DESC, id DESC LIMIT 1 FOR UPDATE`,
+        [userId],
+      );
+      const latestRecord = findResult.rows[0];
+      if (!latestRecord) {
+        logger.info('No logs found to delete for user', { userId });
+        return { success: false };
+      }
+      await client.query('DELETE FROM injections WHERE id = $1', [
+        latestRecord.id,
+      ]);
       logger.info('Successfully deleted latest log entry for user', {
         userId,
         deletedLogId: latestRecord.id,
       });
       return { success: true, deletedRecord: latestRecord };
-    } else {
-      await pool.query('ROLLBACK');
-      logger.error('Failed to delete latest log entry after finding it', {
-        userId,
-        logId: latestRecord.id,
-      });
-      return { success: false };
-    }
+    });
   } catch (error) {
-    await pool.query('ROLLBACK');
     logger.error('PostgreSQL error deleting latest log for user', {
       userId,
       pgError: error,
     });
     return { success: false };
+  }
+}
+
+export async function getLogById(
+  logId: number,
+): Promise<InjectionRecord | null> {
+  try {
+    const result = await pool.query<InjectionRecord>(
+      'SELECT * FROM injections WHERE id = $1',
+      [logId],
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    logger.error('PostgreSQL error fetching log by ID', {
+      logId,
+      pgError: error,
+    });
+    return null;
+  }
+}
+
+export async function updateLog(
+  logId: number,
+  fields: {
+    leg?: 'Right' | 'Left';
+    performedAt?: Date;
+    medication?: string | null;
+    doseMg?: number | null;
+    rawUnits?: number | null;
+  },
+): Promise<InjectionRecord | null> {
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  const add = (column: string, value: unknown) => {
+    values.push(value);
+    sets.push(`${column} = $${values.length}`);
+  };
+  if (fields.leg !== undefined) add('leg', fields.leg);
+  if (fields.performedAt !== undefined) {
+    add('performed_at', fields.performedAt);
+    add('injection_date', fields.performedAt);
+  }
+  if (fields.medication !== undefined) add('medication', fields.medication);
+  if (fields.doseMg !== undefined) add('dose_mg', fields.doseMg);
+  if (fields.rawUnits !== undefined) add('raw_units', fields.rawUnits);
+  if (sets.length === 0) return getLogById(logId);
+
+  values.push(logId);
+  try {
+    const result = await pool.query<InjectionRecord>(
+      `UPDATE injections SET ${sets.join(', ')} WHERE id = $${
+        values.length
+      } RETURNING *`,
+      values,
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    logger.error('PostgreSQL error updating log', { logId, pgError: error });
+    return null;
   }
 }
 

@@ -44,11 +44,15 @@ async function fetchChannelWithRetry(
 ): Promise<TextChannel | null> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const channel = (await client.channels.fetch(channelId)) as TextChannel | null;
+      const channel = (await client.channels.fetch(
+        channelId,
+      )) as TextChannel | null;
       if (channel) return channel;
     } catch (err) {
       logger.warn(
-        `Failed to fetch channel ${channelId} (attempt ${attempt + 1}/${retries + 1})`,
+        `Failed to fetch channel ${channelId} (attempt ${attempt + 1}/${
+          retries + 1
+        })`,
         err,
       );
       if (attempt < retries) {
@@ -99,12 +103,14 @@ export function snoozeNag(hours: number): 'snoozed' | 'no-active-nag' {
   return 'snoozed';
 }
 
+// Long waits are split into chunks; onHandle receives every new handle so the
+// caller can always clear the one that is currently pending.
 function scheduleTimeout(
   target: DateTime,
   callback: () => Promise<void>,
   label: string,
-): NodeJS.Timeout {
-  let timeout: NodeJS.Timeout;
+  onHandle: (handle: NodeJS.Timeout) => void,
+): void {
   const scheduleChunk = () => {
     const now = DateTime.now().setZone(target.zoneName ?? undefined);
     const delayMs = target.diff(now, 'milliseconds').milliseconds;
@@ -121,19 +127,29 @@ function scheduleTimeout(
           MAX_TIMEOUT / (1000 * 60 * 60 * 24),
         )} days away; scheduling intermediate wake-up.`,
       );
-      timeout = setTimeout(scheduleChunk, MAX_TIMEOUT);
+      onHandle(setTimeout(scheduleChunk, MAX_TIMEOUT));
     } else {
-      timeout = setTimeout(() => {
-        void callback();
-      }, delayMs);
+      onHandle(
+        setTimeout(() => {
+          void callback();
+        }, delayMs),
+      );
     }
   };
   scheduleChunk();
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  return timeout!;
 }
 
-async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
+// `after` is the target that just fired. Timers can wake slightly early, so the
+// next target is computed from whichever is later: now or `after`.
+function laterOf(a: DateTime, b?: DateTime): DateTime {
+  return b && b > a ? b : a;
+}
+
+async function internalScheduleJobs(
+  client: Client,
+  settings: GlobalSettings,
+  after?: DateTime,
+) {
   clearScheduled();
   currentSettings = settings;
 
@@ -168,7 +184,10 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
     }
   }
 
-  const nextInjectionDate = getNextInjectionDateTime(settings);
+  const nextInjectionDate = getNextInjectionDateTime(
+    settings,
+    laterOf(DateTime.now(), after),
+  );
   if (!nextInjectionDate) {
     logger.error(
       'Could not compute next injection date from settings. Aborting schedule.',
@@ -194,7 +213,14 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
     ? DateTime.fromISO(settings.last_run_at, { zone: timezone })
     : null;
   const previousInjection = nextInjectionDate.minus({ days: intervalDaysNum });
-  if (!lastRun || (previousInjection.isValid && lastRun < previousInjection)) {
+  const injectionAnchor = DateTime.fromISO(settings.start_time, {
+    zone: timezone,
+  });
+  // Nothing can have been missed before the schedule's first slot.
+  const previousWasDue =
+    previousInjection.isValid &&
+    (!injectionAnchor.isValid || previousInjection >= injectionAnchor);
+  if (previousWasDue && (!lastRun || lastRun < previousInjection)) {
     try {
       const channel = await fetchChannelWithRetry(client, channelId, 2, 1500);
       if (channel) {
@@ -209,7 +235,9 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
         const catchupEmbed = new EmbedBuilder()
           .setTitle(`${medLabel} Reminder (Catch-up)`)
           .setDescription(
-            `A scheduled reminder may have been missed while the bot was offline. Please ensure your last injection is logged.${doseLabel ? `\n${doseLabel}` : ''}`,
+            `A scheduled reminder may have been missed while the bot was offline. Please ensure your last injection is logged.${
+              doseLabel ? `\n${doseLabel}` : ''
+            }`,
           )
           .setColor(0xe67e22)
           .setTimestamp();
@@ -232,16 +260,25 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
       if (!source) return null;
       const dt = DateTime.fromISO(String(source), { zone: tz });
       if (dt.isValid) return dt;
-      const fallback = DateTime.fromJSDate(new Date(String(source))).setZone(tz);
+      const fallback = DateTime.fromJSDate(new Date(String(source))).setZone(
+        tz,
+      );
       return fallback.isValid ? fallback : null;
     } catch (err) {
-      logger.error('Failed to fetch latest injection before sending reminder/prompt', err);
+      logger.error(
+        'Failed to fetch latest injection before sending reminder/prompt',
+        err,
+      );
       return null;
     }
   };
 
-  const scheduleNext = async () => {
-    await internalScheduleJobs(client, currentSettings as GlobalSettings);
+  const scheduleNext = async (firedTarget?: DateTime) => {
+    await internalScheduleJobs(
+      client,
+      currentSettings as GlobalSettings,
+      firedTarget,
+    );
   };
 
   const sendPrompt = async () => {
@@ -257,7 +294,7 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
       const skipRunIso = new Date().toISOString();
       await updateSchedulerRunTimes(skipRunIso, undefined);
       settings.last_run_at = skipRunIso;
-      await scheduleNext();
+      await scheduleNext(nextInjectionDate);
       return;
     }
 
@@ -265,10 +302,9 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
       const channel = await fetchChannelWithRetry(client, channelId, 2, 1500);
 
       if (!channel) {
-        logger.error(
+        throw new Error(
           `Designated channel ${channelId} not found or accessible for injection prompt.`,
         );
-        return; // Exit if channel not found
       }
 
       const medLabel =
@@ -283,7 +319,9 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
       const promptEmbed = new EmbedBuilder()
         .setTitle(`${medLabel} Reminder`)
         .setDescription(
-          `It's injection time! Please log your injection using the \`/injection\` command.${doseLabel ? `\n${doseLabel}` : ''}`,
+          `It's injection time! Please log your injection using the \`/injection\` command.${
+            doseLabel ? `\n${doseLabel}` : ''
+          }`,
         )
         .setColor(0x1abc9c)
         .setThumbnail(
@@ -301,7 +339,7 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
       logger.error('Error in injection prompt job execution:', error);
     } // Closing brace for catch
     // After prompt, schedule next cycle
-    await scheduleNext();
+    await scheduleNext(nextInjectionDate);
     startNagLoop();
   };
 
@@ -405,12 +443,12 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
       const reminderEmbed = new EmbedBuilder()
         .setTitle(`${medLabel} Reminder - 1 Hour Left`)
         .setDescription(
-          `Reminder: Your injection is scheduled in approximately 1 hour. Get ready!${doseLabel ? `\n${doseLabel}` : ''}`,
+          `Reminder: Your injection is scheduled in approximately 1 hour. Get ready!${
+            doseLabel ? `\n${doseLabel}` : ''
+          }`,
         )
         .setColor(0xf1c40f)
-        .setThumbnail(
-          'https://cdn-icons-png.flaticon.com/512/3075/3075977.png',
-        )
+        .setThumbnail('https://cdn-icons-png.flaticon.com/512/3075/3075977.png')
         .setTimestamp();
 
       await channel.send({ content: ownerMention(), embeds: [reminderEmbed] });
@@ -424,19 +462,21 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
   };
 
   logger.info(
-    `Scheduling prompt at ${nextInjectionDate.toISO()} (${timezone}) with interval ${settings.interval_days} day(s).`,
+    `Scheduling prompt at ${nextInjectionDate.toISO()} (${timezone}) with interval ${
+      settings.interval_days
+    } day(s).`,
   );
 
-  promptTimeout = scheduleTimeout(nextInjectionDate, sendPrompt, 'prompt');
+  scheduleTimeout(nextInjectionDate, sendPrompt, 'prompt', (handle) => {
+    promptTimeout = handle;
+  });
   nextPromptTarget = nextInjectionDate;
 
   const reminderDateTime = nextInjectionDate.minus({ hours: 1 });
   if (reminderDateTime > DateTime.now().setZone(timezone)) {
-    reminderTimeout = scheduleTimeout(
-      reminderDateTime,
-      sendReminder,
-      'reminder',
-    );
+    scheduleTimeout(reminderDateTime, sendReminder, 'reminder', (handle) => {
+      reminderTimeout = handle;
+    });
     nextReminderTarget = reminderDateTime;
     logger.info(
       `Scheduling reminder at ${reminderDateTime.toISO()} (${timezone}).`,
@@ -446,15 +486,15 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
   }
 
   // --- Hormone test reminder (E/T labs) ---
+  let firedTest: DateTime | undefined;
   const sendTestReminder = async () => {
     try {
       const channel = await fetchChannelWithRetry(client, channelId, 2, 1500);
 
       if (!channel) {
-        logger.error(
+        throw new Error(
           `Designated channel ${channelId} not found or accessible for hormone test reminder.`,
         );
-        return;
       }
 
       const tz = settings.test_timezone ?? timezone;
@@ -477,31 +517,41 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
     } catch (error) {
       logger.error('Error in hormone test reminder execution:', error);
     }
-    await scheduleTestReminder();
+    await scheduleTestReminder(firedTest);
   };
 
-  const scheduleTestReminder = async () => {
+  const scheduleTestReminder = async (after?: DateTime) => {
     if (
       !settings.test_start_time ||
       !settings.test_interval_days ||
       settings.test_interval_days <= 0
-    ) return;
+    )
+      return;
 
     const nextTest = getNextFromAnchor(
       settings.test_start_time,
       Number(settings.test_interval_days),
       settings.test_timezone ?? timezone,
+      laterOf(DateTime.now(), after),
     );
     if (!nextTest) return;
+    firedTest = nextTest;
 
     const lastTestRun = settings.test_last_run_at
       ? DateTime.fromISO(settings.test_last_run_at, {
           zone: settings.test_timezone ?? timezone,
         })
       : null;
-    const prevTest = nextTest.minus({ days: Number(settings.test_interval_days) });
+    const prevTest = nextTest.minus({
+      days: Number(settings.test_interval_days),
+    });
 
-    if (!lastTestRun || (prevTest.isValid && lastTestRun < prevTest)) {
+    const testAnchor = DateTime.fromISO(settings.test_start_time, {
+      zone: settings.test_timezone ?? timezone,
+    });
+    const prevTestWasDue =
+      prevTest.isValid && (!testAnchor.isValid || prevTest >= testAnchor);
+    if (prevTestWasDue && (!lastTestRun || lastTestRun < prevTest)) {
       try {
         const channel = await fetchChannelWithRetry(client, channelId, 2, 1500);
         if (channel) {
@@ -517,16 +567,22 @@ async function internalScheduleJobs(client: Client, settings: GlobalSettings) {
           await updateSchedulerRunTimes(undefined, testCatchupRunIso);
           settings.test_last_run_at = testCatchupRunIso;
         } else {
-          logger.error(`Designated channel ${channelId} not found for test catch-up reminder.`);
+          logger.error(
+            `Designated channel ${channelId} not found for test catch-up reminder.`,
+          );
         }
       } catch (err) {
         logger.error('Failed to send test catch-up reminder', err);
       }
     }
 
-    testReminderTimeout = scheduleTimeout(nextTest, sendTestReminder, 'hormone-test');
+    scheduleTimeout(nextTest, sendTestReminder, 'hormone-test', (handle) => {
+      testReminderTimeout = handle;
+    });
     logger.info(
-      `Scheduled hormone test reminder at ${nextTest.toISO()} (${settings.test_timezone ?? timezone}) every ${settings.test_interval_days} day(s).`,
+      `Scheduled hormone test reminder at ${nextTest.toISO()} (${
+        settings.test_timezone ?? timezone
+      }) every ${settings.test_interval_days} day(s).`,
     );
   };
 

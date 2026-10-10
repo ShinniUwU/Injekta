@@ -21,7 +21,9 @@ export async function refreshCommands(
     // --- Existing commands ---
     new SlashCommandBuilder()
       .setName('injection')
-      .setDescription('Log your injection after confirmation (with optional dose/medication).')
+      .setDescription(
+        'Log your injection after confirmation (with optional dose/medication).',
+      )
       .addNumberOption((option) =>
         option
           .setName('dose_mg')
@@ -38,7 +40,9 @@ export async function refreshCommands(
       .addStringOption((option) =>
         option
           .setName('performed_at')
-          .setDescription('When the injection was performed (ISO date or YYYY-MM-DD)')
+          .setDescription(
+            'When the injection was performed (ISO date or YYYY-MM-DD)',
+          )
           .setRequired(false),
       )
       .addNumberOption((option) =>
@@ -48,6 +52,18 @@ export async function refreshCommands(
           .setRequired(false)
           .setMinValue(0)
           .setMaxValue(200),
+      )
+      .addStringOption((option) =>
+        option
+          .setName('leg')
+          .setDescription(
+            'Which leg (defaults to alternating from the last log)',
+          )
+          .setRequired(false)
+          .addChoices(
+            { name: 'Left', value: 'Left' },
+            { name: 'Right', value: 'Right' },
+          ),
       )
       .toJSON(),
     new SlashCommandBuilder()
@@ -159,7 +175,9 @@ export async function refreshCommands(
       .addStringOption((option) =>
         option
           .setName('performed_at')
-          .setDescription('When the injection was performed (ISO date or YYYY-MM-DD)')
+          .setDescription(
+            'When the injection was performed (ISO date or YYYY-MM-DD)',
+          )
           .setRequired(false),
       )
       .addNumberOption((option) =>
@@ -169,6 +187,18 @@ export async function refreshCommands(
           .setRequired(false)
           .setMinValue(0)
           .setMaxValue(200),
+      )
+      .addStringOption((option) =>
+        option
+          .setName('leg')
+          .setDescription(
+            'Which leg (defaults to alternating from the last log)',
+          )
+          .setRequired(false)
+          .addChoices(
+            { name: 'Left', value: 'Left' },
+            { name: 'Right', value: 'Right' },
+          ),
       )
       .toJSON(),
 
@@ -215,9 +245,9 @@ export async function refreshCommands(
             .setName('log_id')
             .setDescription(
               'The specific ID of the log entry to delete (optional).',
-          )
-          .setRequired(false)
-          .setMinValue(1), // Log IDs should be positive
+            )
+            .setRequired(false)
+            .setMinValue(1), // Log IDs should be positive
       )
       .toJSON(),
 
@@ -269,13 +299,40 @@ export async function refreshCommands(
       .addStringOption((option) =>
         option
           .setName('timezone')
-          .setDescription('Timezone for reminders (e.g., UTC, America/New_York)')
+          .setDescription(
+            'Timezone for reminders (e.g., UTC, America/New_York)',
+          )
           .setRequired(false),
       )
       .toJSON(),
     new SlashCommandBuilder()
+      .setName('setleg')
+      .setDescription(
+        "Fix which leg a log was saved as (admins can fix anyone's log).",
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName('log_id')
+          .setDescription('The log ID shown in /checklogs (e.g., 87)')
+          .setRequired(true)
+          .setMinValue(1),
+      )
+      .addStringOption((option) =>
+        option
+          .setName('leg')
+          .setDescription('The leg it should be')
+          .setRequired(true)
+          .addChoices(
+            { name: 'Left', value: 'Left' },
+            { name: 'Right', value: 'Right' },
+          ),
+      )
+      .toJSON(),
+    new SlashCommandBuilder()
       .setName('snooze')
-      .setDescription('Push the current injection nag back if you are unavailable.')
+      .setDescription(
+        'Push the current injection nag back if you are unavailable.',
+      )
       .addIntegerOption((option) =>
         option
           .setName('hours')
@@ -300,7 +357,9 @@ export async function refreshCommands(
       .toJSON(),
     new SlashCommandBuilder()
       .setName('health')
-      .setDescription('Admin: Check database connectivity and scheduler status.')
+      .setDescription(
+        'Admin: Check database connectivity and scheduler status.',
+      )
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .toJSON(),
     new SlashCommandBuilder()

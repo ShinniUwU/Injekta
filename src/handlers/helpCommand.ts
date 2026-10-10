@@ -34,7 +34,7 @@ export async function handleHelpCommand(interaction: CommandInteraction) {
       {
         name: 'Fixing mistakes',
         value:
-          'Use /deletemylog to undo your latest entry (or a specific one), and /checklogs to see what is saved. Admins can use /logfor or /admindeletelog to help.',
+          'Use /checklogs to see what is saved, then pick a log to flip its leg, fix the date or dose, or delete it. Quick fix for a wrong leg: /setleg log_id:<ID> leg:<Left/Right>. Admins can do the same with /checklogs user:@someone, or log for someone with /logfor.',
       },
       {
         name: 'Reminders',

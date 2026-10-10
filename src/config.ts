@@ -43,7 +43,7 @@ try {
   new URL(config.databaseUrl);
 } catch (e) {
   logger.error(
-    `Invalid DATABASE_URL format: ${config.databaseUrl}. It should be like postgresql://user:password@host:port/database`,
+    'Invalid DATABASE_URL format. It should be like postgresql://user:password@host:port/database',
   );
   process.exit(1);
 }
