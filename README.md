@@ -6,9 +6,10 @@
 
 ## Features
 
-- **Injection logging** — `/injection` with button confirmation. Dose, medication, and raw units are optional.
-- **Automatic leg alternation** — always knows whether Right or Left is next based on your last log.
-- **Log history** — `/checklogs` shows your last 5 entries with dates, leg, medication, and dose.
+- **Injection logging** — `/injection` with button confirmation. The confirm screen shows which leg will be saved, with a button to switch it. Dose, medication, and raw units are optional.
+- **Automatic leg alternation** — picks Right or Left based on the injection right before this one by date, so logs added for past dates don't break the alternation. Pass `leg:` to override.
+- **Log history and editing** - `/checklogs` shows your last 5 entries and flags two of the same leg in a row. Pick an entry to flip its leg, fix the date/dose/units, or delete it.
+- **Leg fixes** - `/setleg log_id:<ID> leg:<Left|Right>` corrects a wrong leg in one command. Old logs are never changed automatically, since doing the same leg twice can be real.
 - **Stats** — `/stats` shows total injections logged and current streak.
 - **Reminders** — 1-hour warning + on-time prompt posted in the designated channel, including medication and dose. Reminders tag `BOT_OWNER_ID` if set.
 - **Injection nag** — if the on-time prompt goes unlogged, pings hourly for up to 12 hours; `/snooze <hours>` pushes it back.
@@ -142,8 +143,9 @@ The scheduler re-reads all settings from the database on startup and picks up ex
 
 | Command                                                                                | Description                                    | Who                         |
 | -------------------------------------------------------------------------------------- | ---------------------------------------------- | --------------------------- |
-| `/injection [dose_mg] [medication] [performed_at] [raw_units]`                         | Log an injection                               | Everyone                    |
-| `/checklogs [user]`                                                                    | View last 5 injection logs                     | Everyone (admin for others) |
+| `/injection [dose_mg] [medication] [performed_at] [raw_units] [leg]`                   | Log an injection                               | Everyone                    |
+| `/checklogs [user]`                                                                    | View, edit, or delete your last 5 logs         | Everyone (admin for others) |
+| `/setleg <log_id> <leg>`                                                               | Fix which leg a log was saved as               | Everyone (admin for others) |
 | `/nextinjection`                                                                       | Show when the next injection is due            | Everyone                    |
 | `/snooze <hours>`                                                                      | Push the current injection nag back by N hours | Everyone                    |
 | `/stats [user]`                                                                        | Total logs and streak                          | Everyone (admin for others) |
@@ -151,10 +153,10 @@ The scheduler re-reads all settings from the database on startup and picks up ex
 | `/convertunits <units> <concentration_mg_per_ml>`                                      | Convert syringe units to mg                    | Everyone                    |
 | `/help`                                                                                | Show command overview                          | Everyone                    |
 | `/timecheck`                                                                           | Show current time in the configured timezone   | Everyone                    |
-| `/health`                                                                              | Check bot and database status                  | Everyone                    |
+| `/health`                                                                              | Check bot and database status                  | Admin                       |
 | `/setinjectionschedule <day> <time> [timezone] [interval_days] [medication] [dose_mg]` | Configure the global injection schedule        | Admin                       |
 | `/sethormonetest [start_date] [interval_days] [timezone]`                              | Configure hormone test reminders               | Admin                       |
-| `/logfor <user> [dose_mg] [medication]`                                                | Log an injection for another user              | Admin                       |
+| `/logfor <user> [dose_mg] [medication] [performed_at] [raw_units] [leg]`               | Log an injection for another user              | Admin                       |
 | `/admindeletelog <user> <log_id>`                                                      | Delete any user's log entry                    | Admin                       |
 | `/updatecheck`                                                                         | Manually check for available git updates       | Admin                       |
 | `/setupcheck`                                                                          | Verify DB connection and channel config        | Admin                       |
