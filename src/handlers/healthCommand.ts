@@ -3,6 +3,7 @@ import { MessageFlags } from 'discord.js';
 import { pingDatabase } from '../database';
 import { getSchedulerStatus } from '../scheduler';
 import { hasAdminPermission } from '../utils/permissions';
+import { guildIdOf } from '../utils/access';
 
 export async function handleHealthCommand(interaction: CommandInteraction) {
   if (!interaction.inGuild() || !hasAdminPermission(interaction)) {
@@ -16,21 +17,15 @@ export async function handleHealthCommand(interaction: CommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const dbOk = await pingDatabase();
-  const scheduler = getSchedulerStatus();
+  const scheduler = getSchedulerStatus(guildIdOf(interaction));
 
   const lines = [
     `Database: **${dbOk ? 'ok' : 'unreachable'}**`,
     `Scheduler initialized: **${scheduler.initialized ? 'yes' : 'no'}**`,
-    `Prompt scheduled: **${scheduler.promptScheduled ? 'yes' : 'no'}**${
-      scheduler.nextPromptISO ? ` (next ${scheduler.nextPromptISO})` : ''
-    }`,
-    `Reminder scheduled: **${scheduler.reminderScheduled ? 'yes' : 'no'}**${
-      scheduler.nextReminderISO ? ` (next ${scheduler.nextReminderISO})` : ''
-    }`,
-    `Nag active: **${scheduler.nagActive ? 'yes' : 'no'}**${
-      scheduler.nagDeadlineISO ? ` (until ${scheduler.nagDeadlineISO})` : ''
-    }`,
-    `Timezone: **${scheduler.timezone ?? 'unknown'}**`,
+    `Hormone test reminder: ${scheduler.nextTestISO ?? 'not set'}`,
+    // Counts only: admins shouldn't learn who has a schedule or a pending nag
+    `Personal schedules in this server: **${scheduler.personalSchedules}**`,
+    `Active nags: **${scheduler.activeNags}**`,
   ];
 
   await interaction.editReply({ content: lines.join('\n') });

@@ -1,8 +1,8 @@
 // src/handlers/setupCheckCommand.ts
 import type { CommandInteraction } from 'discord.js';
 import { EmbedBuilder, MessageFlags } from 'discord.js';
-import { config } from '../config';
-import { getGlobalSettings, pingDatabase } from '../database';
+import { getGuildSettings, pingDatabase } from '../database';
+import { guildIdOf } from '../utils/access';
 import { hasAdminPermission } from '../utils/permissions';
 
 export async function handleSetupCheckCommand(interaction: CommandInteraction) {
@@ -17,12 +17,9 @@ export async function handleSetupCheckCommand(interaction: CommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const dbOk = await pingDatabase();
-  const settings = await getGlobalSettings();
+  const settings = await getGuildSettings(guildIdOf(interaction));
 
-  const channelSet = Boolean(config.designatedChannelId);
-  const scheduleSet = Boolean(
-    settings?.injection_day !== undefined && settings?.start_time,
-  );
+  const channelSet = Boolean(settings?.channel_id);
 
   const embed = new EmbedBuilder()
     .setTitle('Setup check')
@@ -34,8 +31,8 @@ export async function handleSetupCheckCommand(interaction: CommandInteraction) {
       {
         name: 'Discord settings',
         value: channelSet
-          ? `Designated channel: <#${config.designatedChannelId}>`
-          : 'Set DESIGNATED_CHANNEL_ID to the channel you want for /injection logs.',
+          ? `Reminder channel: <#${settings?.channel_id}>`
+          : 'No channel yet. Run /setchannel to pick where /injection and channel reminders go. Without it, people can log anywhere and only DM reminders work.',
       },
       {
         name: 'Database',
@@ -44,20 +41,19 @@ export async function handleSetupCheckCommand(interaction: CommandInteraction) {
           : 'Cannot reach database. Check DATABASE_URL and that PostgreSQL is running.',
       },
       {
-        name: 'Schedule',
-        value: scheduleSet
-          ? `Injection reminders configured (every ${settings?.interval_days} day(s), time ${settings?.injection_time} ${settings?.timezone}).`
-          : 'No schedule yet. Run /setinjectionschedule to start reminders.',
+        name: 'Reminders',
+        value:
+          'Each member sets their own schedule with /myschedule set. There is no server-wide schedule.',
       },
       {
         name: 'Member commands',
         value:
-          'Members can use /help for a gentle walkthrough, /injection to log, /nextinjection for timing, and /checklogs to view their history.',
+          'Members can use /help for a walkthrough, /injection to log, /myschedule for their own reminders, and /privacy to choose DM or channel reminders. Logs are private by default; admins only see them if the member allows it.',
       },
       {
         name: 'Admin tips',
         value:
-          'After DATABASE_URL and DESIGNATED_CHANNEL_ID are set, restart the bot so slash commands refresh. Use /sethormonetest for lab reminders if your community wants them.',
+          'Use /sethormonetest for lab reminders if your community wants them.',
       },
     )
     .setFooter({

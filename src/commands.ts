@@ -1,6 +1,11 @@
 // src/commands.ts
 import { REST } from '@discordjs/rest';
-import { Routes, PermissionFlagsBits } from 'discord-api-types/v10'; // Import Permissions
+import {
+  ChannelType,
+  InteractionContextType,
+  PermissionFlagsBits,
+  Routes,
+} from 'discord-api-types/v10';
 import { SlashCommandBuilder } from '@discordjs/builders';
 import logger from './logger';
 
@@ -17,7 +22,7 @@ export async function refreshCommands(
     return;
   }
 
-  const commands = [
+  const commandDefinitions = [
     // --- Existing commands ---
     new SlashCommandBuilder()
       .setName('injection')
@@ -79,64 +84,6 @@ export async function refreshCommands(
     new SlashCommandBuilder()
       .setName('nextinjection')
       .setDescription('Check time remaining until next injection.')
-      .toJSON(),
-    new SlashCommandBuilder()
-      .setName('setinjectionschedule')
-      .setDescription('Admin: Set the global injection schedule.')
-      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator) // Set admin permission requirement
-      .addStringOption((option) =>
-        option
-          .setName('day')
-          .setDescription('Day of the week (Sunday, Monday, etc.)')
-          .setRequired(true)
-          .addChoices(
-            { name: 'Sunday', value: 'Sunday' },
-            { name: 'Monday', value: 'Monday' },
-            { name: 'Tuesday', value: 'Tuesday' },
-            { name: 'Wednesday', value: 'Wednesday' },
-            { name: 'Thursday', value: 'Thursday' },
-            { name: 'Friday', value: 'Friday' },
-            { name: 'Saturday', value: 'Saturday' },
-          ),
-      )
-      .addStringOption((option) =>
-        option
-          .setName('time')
-          .setDescription('Time in HH:MM (24-hour) format (e.g., 09:00, 14:30)')
-          .setRequired(true),
-      )
-      .addStringOption((option) =>
-        option
-          .setName('timezone')
-          .setDescription(
-            'Timezone name (e.g., UTC, America/New_York, Europe/Sofia)',
-          )
-          .setRequired(false),
-      )
-      .addNumberOption((option) =>
-        option
-          .setName('interval_days')
-          .setDescription(
-            'Interval between injections in days (e.g., 3.5, 10, 30). Default: 7',
-          )
-          .setRequired(false)
-          .setMinValue(1)
-          .setMaxValue(30),
-      )
-      .addStringOption((option) =>
-        option
-          .setName('medication')
-          .setDescription('Medication name for reminders (e.g., estradiol)')
-          .setRequired(false),
-      )
-      .addNumberOption((option) =>
-        option
-          .setName('dose_mg')
-          .setDescription('Default dose (mg) to display in reminders')
-          .setRequired(false)
-          .setMinValue(0.01)
-          .setMaxValue(1000),
-      )
       .toJSON(),
     new SlashCommandBuilder()
       .setName('stats')
@@ -386,7 +333,112 @@ export async function refreshCommands(
           ),
       )
       .toJSON(),
+    new SlashCommandBuilder()
+      .setName('myschedule')
+      .setDescription('Your own injection schedule in this server.')
+      .addSubcommand((sub) =>
+        sub
+          .setName('set')
+          .setDescription('Set your injection schedule and reminders.')
+          .addStringOption((option) =>
+            option
+              .setName('next')
+              .setDescription('Your next injection, e.g. 2026-10-17 09:00')
+              .setRequired(true),
+          )
+          .addNumberOption((option) =>
+            option
+              .setName('every_days')
+              .setDescription('Days between injections (e.g. 7, 3.5, 10)')
+              .setRequired(true)
+              .setMinValue(1)
+              .setMaxValue(30),
+          )
+          .addStringOption((option) =>
+            option
+              .setName('timezone')
+              .setDescription('Your timezone, e.g. Europe/Berlin')
+              .setRequired(false),
+          )
+          .addStringOption((option) =>
+            option
+              .setName('medication')
+              .setDescription('Shown only in your DM reminders and logs')
+              .setRequired(false),
+          )
+          .addNumberOption((option) =>
+            option
+              .setName('dose_mg')
+              .setDescription('Shown only in your DM reminders and logs')
+              .setRequired(false)
+              .setMinValue(0.01)
+              .setMaxValue(1000),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub.setName('show').setDescription('Show your schedule.'),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('clear')
+          .setDescription('Remove your schedule and stop reminders.'),
+      )
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('privacy')
+      .setDescription(
+        'See or change who can access your logs and where reminders go.',
+      )
+      .addStringOption((option) =>
+        option
+          .setName('admin_access')
+          .setDescription(
+            'Let admins view and manage your logs (default: block)',
+          )
+          .setRequired(false)
+          .addChoices(
+            { name: 'block', value: 'block' },
+            { name: 'allow', value: 'allow' },
+          ),
+      )
+      .addStringOption((option) =>
+        option
+          .setName('reminders')
+          .setDescription('Where your reminders go (default: dm)')
+          .setRequired(false)
+          .addChoices(
+            { name: 'dm', value: 'dm' },
+            { name: 'channel', value: 'channel' },
+          ),
+      )
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('exportmydata')
+      .setDescription('Download all your data in this server as a JSON file.')
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('deletemydata')
+      .setDescription('Delete all your logs and settings in this server.')
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('setchannel')
+      .setDescription('Admin: channel for /injection and channel reminders.')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addChannelOption((option) =>
+        option
+          .setName('channel')
+          .setDescription('The channel to use')
+          .setRequired(true)
+          .addChannelTypes(ChannelType.GuildText),
+      )
+      .toJSON(),
   ];
+
+  // Every command needs a server: logs and settings are per server.
+  const commands = commandDefinitions.map((command) => ({
+    ...command,
+    contexts: [InteractionContextType.Guild],
+  }));
 
   const rest = new REST({ version: '10' }).setToken(botToken);
 
@@ -401,6 +453,12 @@ export async function refreshCommands(
       }.`,
     );
     const updatedCommands = await rest.put(route, { body: commands });
+    if (useGlobal && guildId) {
+      // Drop old guild-scoped copies so they don't show up twice in that server
+      await rest.put(Routes.applicationGuildCommands(clientId, guildId), {
+        body: [],
+      });
+    }
     logger.info(
       `Successfully refreshed application (/) commands as ${
         useGlobal ? 'global' : 'guild-scoped'

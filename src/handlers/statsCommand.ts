@@ -2,40 +2,37 @@
 import type { CommandInteraction, User } from 'discord.js';
 import { EmbedBuilder, MessageFlags } from 'discord.js';
 // Import the NEW function instead of supabase
-import { getAllUserRecords } from '../database';
+import { getAllUserRecords, getUserSchedule } from '../database';
 import type { InjectionRecord } from '../database'; // Use type from database.ts
 import logger from '../logger';
-import { hasAdminPermission } from '../utils/permissions';
+import {
+  canAccessUserData,
+  guildIdOf,
+  PRIVATE_LOGS_MESSAGE,
+} from '../utils/access';
 
 export async function handleStatsCommand(interaction: CommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const userOption = interaction.options.get('user');
-  const targetUserFromOption = userOption?.user;
+  const guildId = guildIdOf(interaction);
+  const userToCheck: User =
+    interaction.options.get('user')?.user ?? interaction.user;
+  const userIdToCheck = userToCheck.id;
 
-  let userIdToCheck: string;
-  let userToCheck: User;
-
-  if (targetUserFromOption) {
-    if (
-      targetUserFromOption.id !== interaction.user.id &&
-      !hasAdminPermission(interaction)
-    ) {
-      await interaction.editReply({
-        content:
-          'You need Administrator permissions to check stats for other users.',
-      });
-      return;
-    }
-    userIdToCheck = targetUserFromOption.id;
-    userToCheck = targetUserFromOption;
-  } else {
-    userIdToCheck = interaction.user.id;
-    userToCheck = interaction.user;
+  if (!(await canAccessUserData(interaction, userIdToCheck))) {
+    await interaction.editReply(PRIVATE_LOGS_MESSAGE);
+    return;
   }
 
+  // A streak allows one day of slack on top of the person's interval
+  const schedule = await getUserSchedule(guildId, userIdToCheck);
+  const maxGapDays = (Number(schedule?.interval_days) || 7) + 1;
+
   // Use the new function to get all records for the user
-  const records: InjectionRecord[] = await getAllUserRecords(userIdToCheck);
+  const records: InjectionRecord[] = await getAllUserRecords(
+    guildId,
+    userIdToCheck,
+  );
 
   // Check if records is null or empty (getAllUserRecords returns [] on error)
   if (!records || records.length === 0) {
@@ -93,7 +90,7 @@ export async function handleStatsCommand(interaction: CommandInteraction) {
         const diffDays = diffTime / (1000 * 60 * 60 * 24);
 
         // Check if the gap is more than 0 days and less than or equal to 8 days (allowing for some flexibility around a week)
-        if (diffDays > 0 && diffDays <= 8) {
+        if (diffDays > 0 && diffDays <= maxGapDays) {
           currentStreak++;
         } else {
           // If the gap is too large, the streak breaks
@@ -112,7 +109,7 @@ export async function handleStatsCommand(interaction: CommandInteraction) {
   const embed = new EmbedBuilder()
     .setTitle(`${userToCheck.username}'s Injection Statistics`)
     .setDescription(
-      `Total injections logged: **${total}**\nCurrent weekly streak: **${currentStreak}** week(s)`,
+      `Total injections logged: **${total}**\nCurrent streak: **${currentStreak}** injection(s) on schedule`,
     )
     .setColor(0x2ecc71)
     .setThumbnail(userToCheck.displayAvatarURL() ?? '')

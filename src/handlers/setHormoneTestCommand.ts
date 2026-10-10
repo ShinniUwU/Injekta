@@ -1,8 +1,9 @@
 // src/handlers/setHormoneTestCommand.ts
 import type { CommandInteraction } from 'discord.js';
 import { MessageFlags } from 'discord.js';
-import type { GlobalSettings } from '../database';
-import { getGlobalSettings, setGlobalSettings } from '../database';
+import { updateGuildSettings } from '../database';
+import { rescheduleGuild } from '../scheduler';
+import { guildIdOf } from '../utils/access';
 import { isValidTimeZone } from '../time';
 import { DateTime } from 'luxon';
 import logger from '../logger';
@@ -71,24 +72,16 @@ export async function handleSetHormoneTestCommand(
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const current = await getGlobalSettings();
-  const newSettings: Omit<GlobalSettings, 'id'> = {
-    injection_day: current?.injection_day ?? 0,
-    injection_time: current?.injection_time ?? '09:00',
-    timezone: current?.timezone ?? 'UTC',
-    interval_days: current?.interval_days ?? 7,
-    start_time: current?.start_time ?? startIso,
-    medication: current?.medication ?? 'Injection',
-    dose_mg: current?.dose_mg ?? null,
+  const guildId = guildIdOf(interaction);
+  const success = await updateGuildSettings(guildId, {
     test_start_time: startIso,
     test_interval_days: interval_days,
-    test_timezone: timezone ?? current?.timezone ?? 'UTC',
-    last_run_at: current?.last_run_at ?? null,
-    test_last_run_at: current?.test_last_run_at ?? null,
-  };
-
-  const success = await setGlobalSettings(newSettings);
+    test_timezone: timezone ?? 'UTC',
+    // Treat "now" as already reminded so setting it up doesn't fire a catch-up
+    test_last_run_at: new Date().toISOString(),
+  });
   if (success) {
+    await rescheduleGuild(guildId);
     await interaction.editReply(
       `Hormone test reminder set. Start: ${startIso} (${
         timezone ?? 'UTC'

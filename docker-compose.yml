@@ -1,0 +1,32 @@
+# Runs Injekta and its PostgreSQL database.
+# 1. Copy .env.example to .env and fill in BOT_TOKEN and CLIENT_ID
+# 2. docker compose up -d
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: injekta
+      POSTGRES_USER: injekta
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-injekta}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U injekta -d injekta']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Overrides any DATABASE_URL in .env so the bot talks to the db service
+      DATABASE_URL: postgresql://injekta:${POSTGRES_PASSWORD:-injekta}@db:5432/injekta
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

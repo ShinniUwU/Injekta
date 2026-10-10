@@ -1,4 +1,6 @@
 // src/database.ts
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { Pool, types } from 'pg';
 import type { PoolClient, QueryResult } from 'pg';
 import { DateTime } from 'luxon';
@@ -7,33 +9,48 @@ import logger from './logger';
 import { formatTimestampForDisplay } from './time';
 
 // --- Interfaces ---
+export type Leg = 'Right' | 'Left';
+export type RemindVia = 'dm' | 'channel';
+
 export interface InjectionRecord {
   id: number;
+  guild_id: string | null;
   user_id: string;
-  leg: 'Right' | 'Left';
+  leg: Leg;
   injection_date: string; // TIMESTAMPTZ as ISO string from pg
   performed_at: string;
   medication: string | null;
-  dose_mg: number | string | null;
+  dose_mg: number | null;
   raw_units: number | null;
   created_by_admin_id: string | null;
   created_at: string;
 }
 
-export interface GlobalSettings {
-  id: number;
-  injection_day: number;
-  injection_time: string;
-  timezone: string;
-  interval_days: number;
-  start_time: string | null;
-  medication: string | null;
-  dose_mg: number | null;
+export interface GuildSettings {
+  guild_id: string;
+  channel_id: string | null;
   test_start_time: string | null;
   test_interval_days: number | null;
   test_timezone: string | null;
-  last_run_at: string | null;
   test_last_run_at: string | null;
+}
+
+export interface UserSchedule {
+  guild_id: string;
+  user_id: string;
+  start_time: string;
+  interval_days: number;
+  timezone: string;
+  medication: string | null;
+  dose_mg: number | null;
+  last_run_at: string | null;
+}
+
+export interface UserSettings {
+  guild_id: string;
+  user_id: string;
+  share_with_admins: boolean;
+  remind_via: RemindVia;
 }
 
 // pg returns TIMESTAMPTZ as Date and NUMERIC as string by default, which doesn't
@@ -72,81 +89,6 @@ try {
   process.exit(1);
 }
 
-// --- Database Functions ---
-
-export async function getLastRecord(
-  userId?: string,
-): Promise<InjectionRecord | null> {
-  const baseQuery =
-    'SELECT id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id, created_at FROM injections';
-  const params: string[] = [];
-  let queryText = baseQuery;
-  if (userId) {
-    queryText +=
-      ' WHERE user_id = $1 ORDER BY performed_at DESC, created_at DESC LIMIT 1';
-    params.push(userId);
-  } else {
-    queryText += ' ORDER BY performed_at DESC, created_at DESC LIMIT 1';
-  }
-  try {
-    const result: QueryResult<InjectionRecord> = await pool.query(
-      queryText,
-      params,
-    );
-    return result.rows[0] || null;
-  } catch (error) {
-    logger.error('PostgreSQL error fetching last record', {
-      userId,
-      pgError: error,
-    });
-    return null;
-  }
-}
-
-// Ensure this function is exported correctly
-export async function getRecentLogs(
-  userId: string,
-  limit = 5,
-): Promise<InjectionRecord[]> {
-  const queryText = `
-        SELECT id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id, created_at
-        FROM injections WHERE user_id = $1 ORDER BY performed_at DESC, created_at DESC LIMIT $2`;
-  try {
-    const result: QueryResult<InjectionRecord> = await pool.query(queryText, [
-      userId,
-      limit,
-    ]);
-    return result.rows;
-  } catch (error) {
-    logger.error('PostgreSQL error fetching recent logs', {
-      userId,
-      limit,
-      pgError: error,
-    });
-    return [];
-  }
-}
-
-export async function getAllUserRecords(
-  userId: string,
-): Promise<InjectionRecord[]> {
-  const queryText = `
-        SELECT id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id, created_at
-        FROM injections WHERE user_id = $1 ORDER BY performed_at ASC, created_at ASC`;
-  try {
-    const result: QueryResult<InjectionRecord> = await pool.query(queryText, [
-      userId,
-    ]);
-    return result.rows;
-  } catch (error) {
-    logger.error('PostgreSQL error fetching all user records', {
-      userId,
-      pgError: error,
-    });
-    return [];
-  }
-}
-
 async function withTransaction<T>(
   fn: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
@@ -164,15 +106,168 @@ async function withTransaction<T>(
   }
 }
 
-export async function enforceMaxFiveRecords(userId: string): Promise<void> {
+// --- Schema / migrations ---
+
+// Applies schema.sql (idempotent) and moves data from the single-server layout
+// (global_settings + injections without guild_id) into the per-server tables.
+export async function migrate(): Promise<void> {
+  const schemaPath = join(import.meta.dir, '..', 'schema.sql');
+  await pool.query(readFileSync(schemaPath, 'utf-8'));
+
+  const legacyGuildId = config.guildId;
+  if (!legacyGuildId) {
+    const orphaned = await pool.query(
+      'SELECT 1 FROM injections WHERE guild_id IS NULL LIMIT 1',
+    );
+    if (orphaned.rowCount) {
+      logger.warn(
+        'Some injection logs have no server attached. Set GUILD_ID once so they can be moved to that server.',
+      );
+    }
+    return;
+  }
+
+  await withTransaction(async (client) => {
+    const moved = await client.query(
+      'UPDATE injections SET guild_id = $1 WHERE guild_id IS NULL',
+      [legacyGuildId],
+    );
+    await client.query(
+      'UPDATE admin_actions SET guild_id = $1 WHERE guild_id IS NULL',
+      [legacyGuildId],
+    );
+    if (moved.rowCount) {
+      logger.info(
+        `Moved ${moved.rowCount} legacy log(s) to server ${legacyGuildId}.`,
+      );
+    }
+
+    const legacyTable = await client.query(
+      "SELECT to_regclass('public.global_settings') AS t",
+    );
+    if (legacyTable.rows[0]?.t) {
+      await client.query(
+        `INSERT INTO guild_settings (guild_id, channel_id, test_start_time, test_interval_days,
+           test_timezone, test_last_run_at)
+         SELECT $1, $2, test_start_time, test_interval_days, test_timezone, test_last_run_at
+         FROM global_settings WHERE id = 1
+         ON CONFLICT (guild_id) DO NOTHING`,
+        [legacyGuildId, config.designatedChannelId || null],
+      );
+      // The old server-wide schedule only ever reminded the bot owner, so it
+      // becomes the owner's personal schedule.
+      if (config.botOwnerId) {
+        const converted = await client.query(
+          `INSERT INTO user_schedules (guild_id, user_id, start_time, interval_days, timezone,
+             medication, dose_mg, last_run_at)
+           SELECT $1, $2, start_time, interval_days, timezone, medication, dose_mg, last_run_at
+           FROM global_settings WHERE id = 1 AND start_time IS NOT NULL
+           ON CONFLICT (guild_id, user_id) DO NOTHING`,
+          [legacyGuildId, config.botOwnerId],
+        );
+        if (converted.rowCount) {
+          logger.info(
+            'Moved the old server schedule to the owner as a personal schedule.',
+          );
+        }
+      } else {
+        logger.warn(
+          'Old server schedule found but BOT_OWNER_ID is not set, so it was not moved. Members need /myschedule set.',
+        );
+      }
+    }
+
+    if (config.designatedChannelId) {
+      await client.query(
+        `INSERT INTO guild_settings (guild_id, channel_id) VALUES ($1, $2)
+         ON CONFLICT (guild_id) DO UPDATE SET channel_id = COALESCE(guild_settings.channel_id, EXCLUDED.channel_id)`,
+        [legacyGuildId, config.designatedChannelId],
+      );
+    }
+  });
+}
+
+// --- Injection logs ---
+
+const RECORD_COLUMNS =
+  'id, guild_id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id, created_at';
+
+export async function getLastRecord(
+  guildId: string,
+  userId: string,
+): Promise<InjectionRecord | null> {
+  try {
+    const result: QueryResult<InjectionRecord> = await pool.query(
+      `SELECT ${RECORD_COLUMNS} FROM injections WHERE guild_id = $1 AND user_id = $2
+       ORDER BY performed_at DESC, created_at DESC LIMIT 1`,
+      [guildId, userId],
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    logger.error('PostgreSQL error fetching last record', {
+      guildId,
+      userId,
+      pgError: error,
+    });
+    return null;
+  }
+}
+
+export async function getRecentLogs(
+  guildId: string,
+  userId: string,
+  limit = 5,
+): Promise<InjectionRecord[]> {
+  try {
+    const result: QueryResult<InjectionRecord> = await pool.query(
+      `SELECT ${RECORD_COLUMNS} FROM injections WHERE guild_id = $1 AND user_id = $2
+       ORDER BY performed_at DESC, created_at DESC LIMIT $3`,
+      [guildId, userId, limit],
+    );
+    return result.rows;
+  } catch (error) {
+    logger.error('PostgreSQL error fetching recent logs', {
+      guildId,
+      userId,
+      pgError: error,
+    });
+    return [];
+  }
+}
+
+export async function getAllUserRecords(
+  guildId: string,
+  userId: string,
+): Promise<InjectionRecord[]> {
+  try {
+    const result: QueryResult<InjectionRecord> = await pool.query(
+      `SELECT ${RECORD_COLUMNS} FROM injections WHERE guild_id = $1 AND user_id = $2
+       ORDER BY performed_at ASC, created_at ASC`,
+      [guildId, userId],
+    );
+    return result.rows;
+  } catch (error) {
+    logger.error('PostgreSQL error fetching all user records', {
+      guildId,
+      userId,
+      pgError: error,
+    });
+    return [];
+  }
+}
+
+export async function enforceMaxFiveRecords(
+  guildId: string,
+  userId: string,
+): Promise<void> {
   const maxRecords = 5;
   try {
     // Keep the 5 most recent injections by when they happened, not when they were logged.
     const deleteResult = await pool.query(
-      `DELETE FROM injections WHERE user_id = $1 AND id NOT IN (
-         SELECT id FROM injections WHERE user_id = $1
-         ORDER BY performed_at DESC, created_at DESC, id DESC LIMIT $2)`,
-      [userId, maxRecords],
+      `DELETE FROM injections WHERE guild_id = $1 AND user_id = $2 AND id NOT IN (
+         SELECT id FROM injections WHERE guild_id = $1 AND user_id = $2
+         ORDER BY performed_at DESC, created_at DESC, id DESC LIMIT $3)`,
+      [guildId, userId, maxRecords],
     );
     if (deleteResult.rowCount) {
       logger.info(
@@ -181,36 +276,42 @@ export async function enforceMaxFiveRecords(userId: string): Promise<void> {
     }
   } catch (error) {
     logger.error('PostgreSQL error enforcing max records', {
+      guildId,
       userId,
       pgError: error,
     });
   }
 }
 
-export function getNextLeg(lastLeg?: string | null): 'Right' | 'Left' {
+export function getNextLeg(lastLeg?: string | null): Leg {
   return lastLeg === 'Right' ? 'Left' : 'Right';
 }
 
 // Most recent injection at or before `before`, so backdated logs alternate
 // against the injection that actually came before them.
 async function getRecordBefore(
+  guildId: string,
   userId: string,
   before: Date,
 ): Promise<InjectionRecord | null> {
   const result: QueryResult<InjectionRecord> = await pool.query(
-    `SELECT * FROM injections WHERE user_id = $1 AND performed_at <= $2
+    `SELECT ${RECORD_COLUMNS} FROM injections
+     WHERE guild_id = $1 AND user_id = $2 AND performed_at <= $3
      ORDER BY performed_at DESC, created_at DESC LIMIT 1`,
-    [userId, before],
+    [guildId, userId, before],
   );
   return result.rows[0] || null;
 }
 
 export async function suggestNextLeg(
+  guildId: string,
   userId: string,
   performedAt: Date = new Date(),
-): Promise<'Right' | 'Left'> {
+): Promise<Leg> {
   try {
-    return getNextLeg((await getRecordBefore(userId, performedAt))?.leg);
+    return getNextLeg(
+      (await getRecordBefore(guildId, userId, performedAt))?.leg,
+    );
   } catch (error) {
     logger.error('PostgreSQL error suggesting next leg', {
       userId,
@@ -221,6 +322,7 @@ export async function suggestNextLeg(
 }
 
 export async function createInjectionRecord(
+  guildId: string,
   userId: string,
   options?: {
     medication?: string | null;
@@ -228,14 +330,14 @@ export async function createInjectionRecord(
     performedAt?: string | Date | null;
     rawUnits?: number | null;
     adminUserId?: string | null;
-    leg?: 'Right' | 'Left' | null;
+    leg?: Leg | null;
   },
 ): Promise<{
   id: number;
-  leg: 'Right' | 'Left';
+  leg: Leg;
   date: string;
   medication: string | null;
-  dose_mg: number | string | null;
+  dose_mg: number | null;
   performed_at: string;
   raw_units: number | null;
 } | null> {
@@ -266,44 +368,43 @@ export async function createInjectionRecord(
 
     const nextLeg =
       options?.leg ??
-      getNextLeg((await getRecordBefore(userId, performedAtValue))?.leg);
-
-    const insertQuery = `
-            INSERT INTO injections (user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id, leg, injection_date, performed_at, medication, dose_mg, raw_units`;
-    const params = [
-      userId,
-      nextLeg,
-      performedAtValue,
-      performedAtValue,
-      options?.medication ?? null,
-      doseValue,
-      rawUnitsValue,
-      options?.adminUserId ?? null,
-    ];
-    const result = await pool.query(insertQuery, params);
-    if (result.rowCount === 1) {
-      await enforceMaxFiveRecords(userId);
-      const formattedDate = formatTimestampForDisplay(
-        result.rows[0].performed_at,
-        'en-US',
+      getNextLeg(
+        (await getRecordBefore(guildId, userId, performedAtValue))?.leg,
       );
-      return {
-        id: result.rows[0].id,
-        leg: result.rows[0].leg,
-        date: formattedDate,
-        medication: result.rows[0].medication,
-        dose_mg: result.rows[0].dose_mg,
-        performed_at: result.rows[0].performed_at,
-        raw_units: result.rows[0].raw_units,
-      };
-    } else {
+
+    const result = await pool.query(
+      `INSERT INTO injections (guild_id, user_id, leg, injection_date, performed_at, medication, dose_mg, raw_units, created_by_admin_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id, leg, injection_date, performed_at, medication, dose_mg, raw_units`,
+      [
+        guildId,
+        userId,
+        nextLeg,
+        performedAtValue,
+        performedAtValue,
+        options?.medication ?? null,
+        doseValue,
+        rawUnitsValue,
+        options?.adminUserId ?? null,
+      ],
+    );
+    if (result.rowCount !== 1) {
       logger.error('PostgreSQL error inserting new record: No rows returned', {
         userId,
       });
       return null;
     }
+    await enforceMaxFiveRecords(guildId, userId);
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      leg: row.leg,
+      date: formatTimestampForDisplay(row.performed_at, 'en-US'),
+      medication: row.medication,
+      dose_mg: row.dose_mg,
+      performed_at: row.performed_at,
+      raw_units: row.raw_units,
+    };
   } catch (error) {
     logger.error('PostgreSQL error creating injection record', {
       userId,
@@ -313,153 +414,12 @@ export async function createInjectionRecord(
   }
 }
 
-export async function getGlobalSettings(): Promise<GlobalSettings | null> {
-  const queryText =
-    'SELECT id, injection_day, injection_time, timezone, interval_days, start_time, medication, dose_mg, test_start_time, test_interval_days, test_timezone, last_run_at, test_last_run_at FROM global_settings WHERE id = 1 LIMIT 1';
-  try {
-    const result: QueryResult<GlobalSettings> = await pool.query(queryText);
-    if (result.rows.length > 0) {
-      return result.rows[0];
-    } else {
-      logger.warn('Global settings row (id=1) not found in database.');
-      return null;
-    }
-  } catch (error) {
-    logger.error('PostgreSQL error fetching global settings', {
-      pgError: error,
-    });
-    return null;
-  }
-}
-
-export async function setGlobalSettings(
-  settings: Omit<GlobalSettings, 'id'>,
-): Promise<boolean> {
-  const queryText = `
-        INSERT INTO global_settings (id, injection_day, injection_time, timezone, interval_days, start_time, medication, dose_mg, test_start_time, test_interval_days, test_timezone, last_run_at, test_last_run_at)
-        VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        ON CONFLICT (id) DO UPDATE SET
-            injection_day = EXCLUDED.injection_day,
-            injection_time = EXCLUDED.injection_time,
-            timezone = EXCLUDED.timezone,
-            interval_days = EXCLUDED.interval_days,
-            start_time = EXCLUDED.start_time,
-            medication = EXCLUDED.medication,
-            dose_mg = EXCLUDED.dose_mg,
-            test_start_time = EXCLUDED.test_start_time,
-            test_interval_days = EXCLUDED.test_interval_days,
-            test_timezone = EXCLUDED.test_timezone,
-            last_run_at = EXCLUDED.last_run_at,
-            test_last_run_at = EXCLUDED.test_last_run_at`;
-  const params = [
-    settings.injection_day,
-    settings.injection_time,
-    settings.timezone,
-    settings.interval_days,
-    settings.start_time,
-    settings.medication,
-    settings.dose_mg,
-    settings.test_start_time,
-    settings.test_interval_days,
-    settings.test_timezone,
-    settings.last_run_at,
-    settings.test_last_run_at,
-  ];
-  try {
-    const result = await pool.query(queryText, params);
-    return result.rowCount === 1;
-  } catch (error) {
-    logger.error('PostgreSQL error setting global settings', {
-      pgError: error,
-    });
-    return false;
-  }
-}
-
-// --- NEW Deletion Functions ---
-
-export async function deleteLogById(
-  logId: number,
-  userIdToCheck?: string,
-): Promise<{ success: boolean; deletedRecord?: InjectionRecord }> {
-  try {
-    return await withTransaction(async (client) => {
-      const selectResult = await client.query<InjectionRecord>(
-        'SELECT * FROM injections WHERE id = $1 FOR UPDATE',
-        [logId],
-      );
-      const recordToDelete = selectResult.rows[0];
-      if (!recordToDelete) {
-        logger.warn('Attempted to delete non-existent log entry', {
-          logId,
-          userIdToCheck,
-        });
-        return { success: false };
-      }
-      if (userIdToCheck && recordToDelete.user_id !== userIdToCheck) {
-        logger.warn('Attempted to delete log entry belonging to another user', {
-          logId,
-          requestingUser: userIdToCheck,
-          ownerUser: recordToDelete.user_id,
-        });
-        return { success: false };
-      }
-      await client.query('DELETE FROM injections WHERE id = $1', [logId]);
-      logger.info('Successfully deleted log entry', {
-        logId,
-        userId: recordToDelete.user_id,
-      });
-      return { success: true, deletedRecord: recordToDelete };
-    });
-  } catch (error) {
-    logger.error('PostgreSQL error deleting log by ID', {
-      logId,
-      userIdToCheck,
-      pgError: error,
-    });
-    return { success: false };
-  }
-}
-
-export async function deleteLatestLogForUser(
-  userId: string,
-): Promise<{ success: boolean; deletedRecord?: InjectionRecord }> {
-  try {
-    return await withTransaction(async (client) => {
-      const findResult = await client.query<InjectionRecord>(
-        `SELECT * FROM injections WHERE user_id = $1
-         ORDER BY performed_at DESC, created_at DESC, id DESC LIMIT 1 FOR UPDATE`,
-        [userId],
-      );
-      const latestRecord = findResult.rows[0];
-      if (!latestRecord) {
-        logger.info('No logs found to delete for user', { userId });
-        return { success: false };
-      }
-      await client.query('DELETE FROM injections WHERE id = $1', [
-        latestRecord.id,
-      ]);
-      logger.info('Successfully deleted latest log entry for user', {
-        userId,
-        deletedLogId: latestRecord.id,
-      });
-      return { success: true, deletedRecord: latestRecord };
-    });
-  } catch (error) {
-    logger.error('PostgreSQL error deleting latest log for user', {
-      userId,
-      pgError: error,
-    });
-    return { success: false };
-  }
-}
-
 export async function getLogById(
   logId: number,
 ): Promise<InjectionRecord | null> {
   try {
     const result = await pool.query<InjectionRecord>(
-      'SELECT * FROM injections WHERE id = $1',
+      `SELECT ${RECORD_COLUMNS} FROM injections WHERE id = $1`,
       [logId],
     );
     return result.rows[0] || null;
@@ -475,7 +435,7 @@ export async function getLogById(
 export async function updateLog(
   logId: number,
   fields: {
-    leg?: 'Right' | 'Left';
+    leg?: Leg;
     performedAt?: Date;
     medication?: string | null;
     doseMg?: number | null;
@@ -503,7 +463,7 @@ export async function updateLog(
     const result = await pool.query<InjectionRecord>(
       `UPDATE injections SET ${sets.join(', ')} WHERE id = $${
         values.length
-      } RETURNING *`,
+      } RETURNING ${RECORD_COLUMNS}`,
       values,
     );
     return result.rows[0] || null;
@@ -513,53 +473,428 @@ export async function updateLog(
   }
 }
 
-// --- Keep closeDbPool function ---
-export async function closeDbPool() {
-  logger.info('Closing PostgreSQL connection pool...');
-  await pool.end();
-  logger.info('PostgreSQL pool closed.');
+// Deletes a log only if it belongs to the given server and user.
+export async function deleteLogById(
+  logId: number,
+  owner: { guildId: string; userId: string },
+): Promise<{ success: boolean; deletedRecord?: InjectionRecord }> {
+  try {
+    return await withTransaction(async (client) => {
+      const selectResult = await client.query<InjectionRecord>(
+        `SELECT ${RECORD_COLUMNS} FROM injections WHERE id = $1 FOR UPDATE`,
+        [logId],
+      );
+      const record = selectResult.rows[0];
+      if (
+        !record ||
+        record.guild_id !== owner.guildId ||
+        record.user_id !== owner.userId
+      ) {
+        logger.warn('Delete refused: log missing or owned by someone else', {
+          logId,
+        });
+        return { success: false };
+      }
+      await client.query('DELETE FROM injections WHERE id = $1', [logId]);
+      logger.info('Deleted log entry', { logId });
+      return { success: true, deletedRecord: record };
+    });
+  } catch (error) {
+    logger.error('PostgreSQL error deleting log by ID', {
+      logId,
+      pgError: error,
+    });
+    return { success: false };
+  }
+}
+
+export async function deleteLatestLogForUser(
+  guildId: string,
+  userId: string,
+): Promise<{ success: boolean; deletedRecord?: InjectionRecord }> {
+  try {
+    return await withTransaction(async (client) => {
+      const findResult = await client.query<InjectionRecord>(
+        `SELECT ${RECORD_COLUMNS} FROM injections WHERE guild_id = $1 AND user_id = $2
+         ORDER BY performed_at DESC, created_at DESC, id DESC LIMIT 1 FOR UPDATE`,
+        [guildId, userId],
+      );
+      const latestRecord = findResult.rows[0];
+      if (!latestRecord) return { success: false };
+      await client.query('DELETE FROM injections WHERE id = $1', [
+        latestRecord.id,
+      ]);
+      logger.info('Deleted latest log entry', { logId: latestRecord.id });
+      return { success: true, deletedRecord: latestRecord };
+    });
+  } catch (error) {
+    logger.error('PostgreSQL error deleting latest log for user', {
+      userId,
+      pgError: error,
+    });
+    return { success: false };
+  }
+}
+
+// Latest injection time per user in a server.
+export async function getLatestInjectionTimes(
+  guildId: string,
+): Promise<Map<string, string>> {
+  const result = await pool.query<{ user_id: string; latest: string }>(
+    `SELECT user_id, MAX(performed_at) AS latest FROM injections
+     WHERE guild_id = $1 GROUP BY user_id`,
+    [guildId],
+  );
+  return new Map(result.rows.map((row) => [row.user_id, row.latest]));
+}
+
+// --- Server settings ---
+
+const GUILD_SETTING_COLUMNS = [
+  'channel_id',
+  'test_start_time',
+  'test_interval_days',
+  'test_timezone',
+  'test_last_run_at',
+] as const;
+
+export async function getGuildSettings(
+  guildId: string,
+): Promise<GuildSettings | null> {
+  try {
+    const result = await pool.query<GuildSettings>(
+      'SELECT * FROM guild_settings WHERE guild_id = $1',
+      [guildId],
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    logger.error('PostgreSQL error fetching server settings', {
+      guildId,
+      pgError: error,
+    });
+    return null;
+  }
+}
+
+export async function getAllGuildSettings(): Promise<GuildSettings[]> {
+  const result = await pool.query<GuildSettings>(
+    'SELECT * FROM guild_settings',
+  );
+  return result.rows;
+}
+
+// Inserts or updates only the given columns.
+export async function updateGuildSettings(
+  guildId: string,
+  fields: Partial<Omit<GuildSettings, 'guild_id'>>,
+): Promise<boolean> {
+  const columns = GUILD_SETTING_COLUMNS.filter(
+    (column) => fields[column] !== undefined,
+  );
+  if (columns.length === 0) return true;
+  const values = columns.map((column) => fields[column]);
+  const placeholders = columns.map((_, index) => `$${index + 2}`);
+  try {
+    await pool.query(
+      `INSERT INTO guild_settings (guild_id, ${columns.join(', ')})
+       VALUES ($1, ${placeholders.join(', ')})
+       ON CONFLICT (guild_id) DO UPDATE SET ${columns
+         .map((column) => `${column} = EXCLUDED.${column}`)
+         .join(', ')}`,
+      [guildId, ...values],
+    );
+    return true;
+  } catch (error) {
+    logger.error('PostgreSQL error updating server settings', {
+      guildId,
+      pgError: error,
+    });
+    return false;
+  }
+}
+
+// --- Personal schedules ---
+
+export async function getUserSchedule(
+  guildId: string,
+  userId: string,
+): Promise<UserSchedule | null> {
+  try {
+    const result = await pool.query<UserSchedule>(
+      'SELECT * FROM user_schedules WHERE guild_id = $1 AND user_id = $2',
+      [guildId, userId],
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    logger.error('PostgreSQL error fetching personal schedule', {
+      guildId,
+      userId,
+      pgError: error,
+    });
+    return null;
+  }
+}
+
+export async function getAllUserSchedules(): Promise<UserSchedule[]> {
+  const result = await pool.query<UserSchedule>('SELECT * FROM user_schedules');
+  return result.rows;
+}
+
+export async function setUserSchedule(
+  schedule: Omit<UserSchedule, 'last_run_at'>,
+): Promise<boolean> {
+  try {
+    await pool.query(
+      `INSERT INTO user_schedules (guild_id, user_id, start_time, interval_days, timezone, medication, dose_mg, last_run_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       ON CONFLICT (guild_id, user_id) DO UPDATE SET
+         start_time = EXCLUDED.start_time,
+         interval_days = EXCLUDED.interval_days,
+         timezone = EXCLUDED.timezone,
+         medication = EXCLUDED.medication,
+         dose_mg = EXCLUDED.dose_mg,
+         last_run_at = NOW()`,
+      [
+        schedule.guild_id,
+        schedule.user_id,
+        schedule.start_time,
+        schedule.interval_days,
+        schedule.timezone,
+        schedule.medication,
+        schedule.dose_mg,
+      ],
+    );
+    return true;
+  } catch (error) {
+    logger.error('PostgreSQL error saving personal schedule', {
+      guildId: schedule.guild_id,
+      userId: schedule.user_id,
+      pgError: error,
+    });
+    return false;
+  }
+}
+
+export async function deleteUserSchedule(
+  guildId: string,
+  userId: string,
+): Promise<boolean> {
+  const result = await pool.query(
+    'DELETE FROM user_schedules WHERE guild_id = $1 AND user_id = $2',
+    [guildId, userId],
+  );
+  return Boolean(result.rowCount);
+}
+
+// --- Privacy settings ---
+
+export async function getUserSettings(
+  guildId: string,
+  userId: string,
+): Promise<UserSettings> {
+  const defaults: UserSettings = {
+    guild_id: guildId,
+    user_id: userId,
+    share_with_admins: false,
+    remind_via: 'dm',
+  };
+  try {
+    const result = await pool.query<UserSettings>(
+      'SELECT * FROM user_settings WHERE guild_id = $1 AND user_id = $2',
+      [guildId, userId],
+    );
+    return result.rows[0] ?? defaults;
+  } catch (error) {
+    logger.error('PostgreSQL error fetching privacy settings', {
+      guildId,
+      userId,
+      pgError: error,
+    });
+    // Fail closed: if we can't read the setting, treat the user as private.
+    return defaults;
+  }
+}
+
+export async function getAllUserSettings(
+  guildId: string,
+): Promise<Map<string, UserSettings>> {
+  const result = await pool.query<UserSettings>(
+    'SELECT * FROM user_settings WHERE guild_id = $1',
+    [guildId],
+  );
+  return new Map(result.rows.map((row) => [row.user_id, row]));
+}
+
+export async function updateUserSettings(
+  guildId: string,
+  userId: string,
+  fields: { share_with_admins?: boolean; remind_via?: RemindVia },
+): Promise<UserSettings | null> {
+  try {
+    const result = await pool.query<UserSettings>(
+      `INSERT INTO user_settings (guild_id, user_id, share_with_admins, remind_via)
+       VALUES ($1, $2, COALESCE($3, FALSE), COALESCE($4, 'dm'))
+       ON CONFLICT (guild_id, user_id) DO UPDATE SET
+         share_with_admins = COALESCE($3, user_settings.share_with_admins),
+         remind_via = COALESCE($4, user_settings.remind_via)
+       RETURNING *`,
+      [
+        guildId,
+        userId,
+        fields.share_with_admins ?? null,
+        fields.remind_via ?? null,
+      ],
+    );
+    return result.rows[0] ?? null;
+  } catch (error) {
+    logger.error('PostgreSQL error updating privacy settings', {
+      guildId,
+      userId,
+      pgError: error,
+    });
+    return null;
+  }
+}
+
+// Removes everything stored about a user in one server.
+export async function deleteUserData(
+  guildId: string,
+  userId: string,
+): Promise<{ logs: number } | null> {
+  try {
+    return await withTransaction(async (client) => {
+      const logs = await client.query(
+        'DELETE FROM injections WHERE guild_id = $1 AND user_id = $2',
+        [guildId, userId],
+      );
+      await client.query(
+        'DELETE FROM user_schedules WHERE guild_id = $1 AND user_id = $2',
+        [guildId, userId],
+      );
+      await client.query(
+        'DELETE FROM user_settings WHERE guild_id = $1 AND user_id = $2',
+        [guildId, userId],
+      );
+      // Audit entries about this user can contain dose details; drop those too.
+      await client.query(
+        'UPDATE admin_actions SET details = NULL WHERE guild_id = $1 AND target_user_id = $2',
+        [guildId, userId],
+      );
+      return { logs: logs.rowCount ?? 0 };
+    });
+  } catch (error) {
+    logger.error('PostgreSQL error deleting user data', {
+      guildId,
+      userId,
+      pgError: error,
+    });
+    return null;
+  }
+}
+
+// Everything stored about one user in one server, for /exportmydata.
+// Other people's IDs (e.g. which admin logged an entry) are left out.
+export async function exportUserData(guildId: string, userId: string) {
+  const [logs, schedule, settings, adminActions] = await Promise.all([
+    pool.query(
+      `SELECT id, leg, performed_at, medication, dose_mg, raw_units,
+         (created_by_admin_id IS NOT NULL) AS logged_by_admin, created_at
+       FROM injections WHERE guild_id = $1 AND user_id = $2
+       ORDER BY performed_at DESC`,
+      [guildId, userId],
+    ),
+    getUserSchedule(guildId, userId),
+    getUserSettings(guildId, userId),
+    pool.query(
+      `SELECT action, log_id, details, created_at FROM admin_actions
+       WHERE guild_id = $1 AND target_user_id = $2 ORDER BY created_at DESC`,
+      [guildId, userId],
+    ),
+  ]);
+  return {
+    logs: logs.rows,
+    schedule: schedule
+      ? {
+          start_time: schedule.start_time,
+          interval_days: schedule.interval_days,
+          timezone: schedule.timezone,
+          medication: schedule.medication,
+          dose_mg: schedule.dose_mg,
+        }
+      : null,
+    privacy: {
+      share_with_admins: settings.share_with_admins,
+      remind_via: settings.remind_via,
+    },
+    admin_actions_on_your_logs: adminActions.rows,
+  };
 }
 
 // --- Admin actions audit ---
 export async function recordAdminAction(params: {
+  guildId: string;
   adminUserId: string;
   targetUserId?: string;
   action: string;
   logId?: number;
   details?: string;
 }) {
-  const query = `
-    INSERT INTO admin_actions (admin_user_id, target_user_id, action, log_id, details)
-    VALUES ($1, $2, $3, $4, $5)`;
-  const values = [
-    params.adminUserId,
-    params.targetUserId ?? null,
-    params.action,
-    params.logId ?? null,
-    params.details ?? null,
-  ];
   try {
-    await pool.query(query, values);
+    await pool.query(
+      `INSERT INTO admin_actions (guild_id, admin_user_id, target_user_id, action, log_id, details)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        params.guildId,
+        params.adminUserId,
+        params.targetUserId ?? null,
+        params.action,
+        params.logId ?? null,
+        params.details ?? null,
+      ],
+    );
   } catch (error) {
-    logger.error('Failed to record admin action', { params, pgError: error });
+    logger.error('Failed to record admin action', {
+      action: params.action,
+      pgError: error,
+    });
   }
 }
 
-export async function updateSchedulerRunTimes(
-  lastRunAt?: string,
-  testLastRunAt?: string,
+// --- Scheduler bookkeeping ---
+
+export async function updateTestRunTime(
+  guildId: string,
+  testLastRunAt: string,
 ) {
-  const query = `
-    UPDATE global_settings
-    SET
-      last_run_at = COALESCE($1, last_run_at),
-      test_last_run_at = COALESCE($2, test_last_run_at)
-    WHERE id = 1`;
   try {
-    await pool.query(query, [lastRunAt ?? null, testLastRunAt ?? null]);
+    await pool.query(
+      'UPDATE guild_settings SET test_last_run_at = $2 WHERE guild_id = $1',
+      [guildId, testLastRunAt],
+    );
   } catch (error) {
-    logger.error('Failed to update scheduler run times', { pgError: error });
+    logger.error('Failed to update test reminder run time', { pgError: error });
   }
+}
+
+export async function updateUserRunTime(
+  guildId: string,
+  userId: string,
+  lastRunAt: string,
+) {
+  try {
+    await pool.query(
+      'UPDATE user_schedules SET last_run_at = $3 WHERE guild_id = $1 AND user_id = $2',
+      [guildId, userId, lastRunAt],
+    );
+  } catch (error) {
+    logger.error('Failed to update personal run time', { pgError: error });
+  }
+}
+
+export async function closeDbPool() {
+  logger.info('Closing PostgreSQL connection pool...');
+  await pool.end();
+  logger.info('PostgreSQL pool closed.');
 }
 
 // --- Health checks ---

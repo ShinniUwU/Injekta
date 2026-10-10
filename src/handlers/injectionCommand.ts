@@ -15,11 +15,12 @@ import {
 } from 'discord.js';
 import {
   createInjectionRecord,
-  getGlobalSettings,
+  getGuildSettings,
   getNextLeg,
   suggestNextLeg,
 } from '../database';
-import { config } from '../config';
+import { guildIdOf } from '../utils/access';
+import { getUserDefaults } from '../utils/defaults';
 import logger from '../logger';
 import { parseUserDateTimeInput } from '../time';
 import {
@@ -32,18 +33,13 @@ export async function handleInjectionCommand(
   interaction: CommandInteraction,
   client: Client,
 ) {
-  if (!config.designatedChannelId) {
+  const guildId = guildIdOf(interaction);
+  // Servers without a reminder channel let people log anywhere
+  const channelId = (await getGuildSettings(guildId))?.channel_id;
+  if (channelId && interaction.channelId !== channelId) {
     await interaction.reply({
-      content:
-        'I need a home channel to keep injection logs tidy. Please ask an admin to set DESIGNATED_CHANNEL_ID (usually the HRT check-ins channel).',
+      content: `Please log injections in <#${channelId}> so reminders stay organized. If you cannot see it, ask a mod for access.`,
       flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-  if (interaction.channelId !== config.designatedChannelId) {
-    await interaction.reply({
-      content: `Please log injections in <#${config.designatedChannelId}> so reminders stay organized. If you cannot see it, ask a mod for access.`,
-      flags: MessageFlags.Ephemeral, // Use flags
     });
     return;
   }
@@ -57,8 +53,8 @@ export async function handleInjectionCommand(
   // Use flags for deferReply
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const defaults = await getGlobalSettings();
-  const tz = defaults?.timezone ?? 'UTC';
+  const defaults = await getUserDefaults(guildId, interaction.user.id);
+  const tz = defaults.timezone;
   const performedAtDate = performedAt
     ? parseUserDateTimeInput(performedAt, tz)
     : null;
@@ -70,7 +66,11 @@ export async function handleInjectionCommand(
   }
   let leg =
     legOption ??
-    (await suggestNextLeg(interaction.user.id, performedAtDate ?? new Date()));
+    (await suggestNextLeg(
+      guildId,
+      interaction.user.id,
+      performedAtDate ?? new Date(),
+    ));
 
   const interactionId = interaction.id;
   const confirmCustomId = `confirm_injection_${interactionId}`;
@@ -172,9 +172,9 @@ export async function handleInjectionCommand(
 
   if (result === 'confirmed') {
     logger.info(`Injection confirmed by ${interaction.user.tag} via button.`);
-    const record = await createInjectionRecord(interaction.user.id, {
-      medication: medication ?? defaults?.medication ?? null,
-      doseMg: doseMg ?? defaults?.dose_mg ?? null,
+    const record = await createInjectionRecord(guildId, interaction.user.id, {
+      medication: medication ?? defaults.medication,
+      doseMg: doseMg ?? defaults.dose_mg,
       performedAt: performedAtDate ?? undefined,
       rawUnits,
       leg,

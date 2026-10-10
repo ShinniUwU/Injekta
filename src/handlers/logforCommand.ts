@@ -1,11 +1,13 @@
 // src/handlers/logforCommand.ts
 import type { CommandInteraction } from 'discord.js';
 import { MessageFlags } from 'discord.js';
+import { createInjectionRecord, recordAdminAction } from '../database';
 import {
-  createInjectionRecord,
-  getGlobalSettings,
-  recordAdminAction,
-} from '../database';
+  canAccessUserData,
+  guildIdOf,
+  PRIVATE_LOGS_MESSAGE,
+} from '../utils/access';
+import { getUserDefaults } from '../utils/defaults';
 import logger from '../logger';
 import { parseUserDateTimeInput } from '../time';
 import { hasAdminPermission } from '../utils/permissions';
@@ -51,6 +53,12 @@ export async function handleLogforCommand(interaction: CommandInteraction) {
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+  const guildId = guildIdOf(interaction);
+  if (!(await canAccessUserData(interaction, targetUser.id))) {
+    await interaction.editReply(PRIVATE_LOGS_MESSAGE);
+    return;
+  }
+
   const doseMg = getOptionNumber(interaction, 'dose_mg');
   const medication = getOptionString(interaction, 'medication');
   const performedAt = getOptionString(interaction, 'performed_at');
@@ -58,8 +66,8 @@ export async function handleLogforCommand(interaction: CommandInteraction) {
   const leg = getOptionLeg(interaction);
 
   try {
-    const defaults = await getGlobalSettings();
-    const tz = defaults?.timezone ?? 'UTC';
+    const defaults = await getUserDefaults(guildId, targetUser.id);
+    const tz = defaults.timezone;
     const performedAtDate = performedAt
       ? parseUserDateTimeInput(performedAt, tz)
       : null;
@@ -69,9 +77,9 @@ export async function handleLogforCommand(interaction: CommandInteraction) {
       );
       return;
     }
-    const record = await createInjectionRecord(targetUser.id, {
-      medication: medication ?? defaults?.medication ?? null,
-      doseMg: doseMg ?? defaults?.dose_mg ?? null,
+    const record = await createInjectionRecord(guildId, targetUser.id, {
+      medication: medication ?? defaults.medication,
+      doseMg: doseMg ?? defaults.dose_mg,
       performedAt: performedAtDate ?? undefined,
       rawUnits,
       adminUserId: interaction.user.id,
@@ -80,9 +88,10 @@ export async function handleLogforCommand(interaction: CommandInteraction) {
 
     if (record) {
       logger.info(
-        `Admin ${interaction.user.tag} logged injection for ${targetUser.tag}: ${record.leg} leg on ${record.date}.`,
+        `Admin ${interaction.user.tag} logged injection #${record.id} for ${targetUser.tag}.`,
       );
       await recordAdminAction({
+        guildId,
         adminUserId: interaction.user.id,
         targetUserId: targetUser.id,
         action: 'logfor',

@@ -2,6 +2,7 @@ import type { CommandInteraction } from 'discord.js';
 import { MessageFlags } from 'discord.js';
 import { snoozeNag } from '../scheduler';
 import { getOptionNumber } from '../utils/options';
+import { guildIdOf } from '../utils/access';
 
 export async function handleSnoozeCommand(interaction: CommandInteraction) {
   const hours = getOptionNumber(interaction, 'hours');
@@ -14,7 +15,7 @@ export async function handleSnoozeCommand(interaction: CommandInteraction) {
     return;
   }
 
-  const result = snoozeNag(hours);
+  const result = snoozeNag(guildIdOf(interaction), interaction.user.id, hours);
 
   if (result === 'no-active-nag') {
     await interaction.reply({

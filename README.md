@@ -2,44 +2,62 @@
 
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0)
 
-**Injekta** is a self-hosted Discord bot for tracking HRT injections. It alternates legs automatically, tracks medication and dose, supports flexible schedules (e.g. every 3.5, 7, 10, or 30 days), keeps your last 5 logs per user, and fires reminders — all backed by a PostgreSQL database.
+**Injekta** is a privacy-first Discord bot for tracking HRT injections. It alternates legs for you, reminds you by DM on your own schedule (every 3.5, 7, 10 days, whatever you need), and keeps your logs private, even from server admins, unless you choose to share them.
 
 ## Features
 
-- **Injection logging** — `/injection` with button confirmation. The confirm screen shows which leg will be saved, with a button to switch it. Dose, medication, and raw units are optional.
-- **Automatic leg alternation** — picks Right or Left based on the injection right before this one by date, so logs added for past dates don't break the alternation. Pass `leg:` to override.
-- **Log history and editing** - `/checklogs` shows your last 5 entries and flags two of the same leg in a row. Pick an entry to flip its leg, fix the date/dose/units, or delete it.
-- **Leg fixes** - `/setleg log_id:<ID> leg:<Left|Right>` corrects a wrong leg in one command. Old logs are never changed automatically, since doing the same leg twice can be real.
-- **Stats** — `/stats` shows total injections logged and current streak.
-- **Reminders** — 1-hour warning + on-time prompt posted in the designated channel, including medication and dose. Reminders tag `BOT_OWNER_ID` if set.
-- **Injection nag** — if the on-time prompt goes unlogged, pings hourly for up to 12 hours; `/snooze <hours>` pushes it back.
-- **Catch-up reminders** — if the bot was offline and missed a scheduled reminder, it sends one on restart.
-- **Hormone test reminders** — `/sethormonetest` sets recurring E/T lab reminders at a custom interval.
-- **Dosing helper** — `/convertunits` converts raw syringe units to mg given a vial concentration.
-- **Log deletion** — `/deletemylog` lets users delete their own latest or a specific log (with confirmation). Admins use `/admindeletelog`.
-- **Admin tools** — admins can view logs/stats for any user, log injections on behalf of users with `/logfor`, and manage entries.
-- **Update alerts** — on startup and every 6 hours, the bot checks its git remote. If commits are available it posts a notice in the configured channel.
-- **Persistent storage** — everything lives in PostgreSQL. Restarting or updating the bot loses nothing.
+- **Injection logging**: `/injection` shows which leg will be saved before you confirm, with a button to switch it. Dose, medication, and syringe units are optional.
+- **Automatic leg alternation**: picks Right or Left from the injection right before this one by date, so logs added for past dates don't break the alternation. Pass `leg:` to override.
+- **Fixing mistakes**: `/checklogs` flags two of the same leg in a row. Pick an entry to flip its leg, fix the date/dose/units, or delete it. `/setleg log_id:<ID> leg:<Left|Right>` does the leg fix in one command. Old logs are never changed automatically, since doing the same leg twice can be real.
+- **Your own schedule**: `/myschedule set` gives each person their own day, interval, medication, and dose. Only people who set a schedule get reminders.
+- **Reminders**: a 1-hour warning and an on-time prompt, by DM or in the server channel (your choice in `/privacy`). If the prompt goes unlogged, an hourly nag runs for up to 12 hours; `/snooze <hours>` pushes it back. Missed reminders are caught up after a restart.
+- **Multi-server**: one bot can serve many servers. Logs, schedules, and settings are kept separately per server.
+- **Hormone test reminders**: `/sethormonetest` sets recurring E/T lab reminders per server.
+- **Dosing helper**: `/convertunits` converts syringe units to mg for a given vial concentration.
+- **Stats**: `/stats` shows total logs and your streak of on-schedule injections.
+
+## Privacy
+
+Injekta handles health data, so privacy is the default:
+
+- **Admins can't see your logs.** `/checklogs`, `/stats`, `/logfor`, `/setleg`, and `/admindeletelog` refuse to touch another person's logs unless that person runs `/privacy admin_access:allow`. The refusal looks the same whether or not you have logs, so it doesn't reveal that you use the bot.
+- **Reminders go by DM** unless you pick `/privacy reminders:channel`. Channel reminders mention you but never show medication or dose.
+- **All command replies are only visible to you.**
+- **Minimal storage**: your Discord user ID, your last 5 logs (date, leg, and any medication/dose/units you add), your own schedule if you set one, and your privacy choices. Nothing else.
+- **`/exportmydata`** sends you a JSON file of everything stored about you in that server. Only you can run it for yourself, the reply is only visible to you, and the file leaves out other people's IDs (it says whether an admin logged an entry, not which one).
+- **`/deletemydata`** erases all of it for that server. When admins act on your logs (with your permission), the action is recorded in an audit table, and `/deletemydata` clears the details there too.
+- **Bot logs** record IDs and actions, not doses, medication, or legs.
+
+**What privacy mode can't do:** whoever hosts the bot has access to the database, like with any self-hosted app. If you use someone else's instance, you are trusting that person. Hosting it yourself (see below) is the most private option.
 
 ## Table of Contents
 
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Database Setup](#database-setup)
+- [Quick start with Docker](#quick-start-with-docker)
+- [Manual install](#manual-install)
 - [Configuration](#configuration)
-- [Running the Bot](#running-the-bot)
+- [First-run checklist](#first-run-checklist)
 - [Updating the Bot](#updating-the-bot)
 - [Available Commands](#available-commands)
 - [Development](#development)
 - [License](#license)
 
-## Prerequisites
+## Quick start with Docker
 
-- [Bun](https://bun.sh) (recommended runtime)
-- Git
-- PostgreSQL (v12 or higher)
+Runs the bot and a PostgreSQL database together. Needs [Docker](https://docs.docker.com/get-docker/) with Compose.
 
-## Installation
+```bash
+git clone https://github.com/ShinniUwU/Injekta.git
+cd Injekta
+cp .env.example .env    # fill in BOT_TOKEN and CLIENT_ID (see Configuration)
+docker compose up -d
+docker compose logs -f bot
+```
+
+The database password defaults to `injekta`. To change it, set `POSTGRES_PASSWORD=...` in `.env` before the first start. `DATABASE_URL` is set for you by `docker-compose.yml`.
+
+## Manual install
+
+Needs [Bun](https://bun.sh), Git, and PostgreSQL 12 or newer.
 
 ```bash
 git clone https://github.com/ShinniUwU/Injekta.git
@@ -48,25 +66,26 @@ bun install
 bun run prepare   # sets up Husky pre-commit hooks (optional)
 ```
 
-## Database Setup
+Create a database and user:
 
-1. **Create a database and user** in your PostgreSQL instance:
+```sql
+CREATE DATABASE injekta_db;
+CREATE USER injekta_user WITH PASSWORD 'your_secure_password';
+GRANT ALL PRIVILEGES ON DATABASE injekta_db TO injekta_user;
+ALTER DATABASE injekta_db OWNER TO injekta_user;
+```
 
-   ```sql
-   CREATE DATABASE injekta_db;
-   CREATE USER injekta_user WITH PASSWORD 'your_secure_password';
-   GRANT ALL PRIVILEGES ON DATABASE injekta_db TO injekta_user;
-   ```
+You don't need to apply `schema.sql` yourself: the bot runs it on every start, and it only creates what's missing.
 
-2. **Apply the schema:**
+Run it:
 
-   ```bash
-   psql -h localhost -p 5432 -U injekta_user -d injekta_db -f schema.sql
-   ```
+```bash
+bun run dev                                   # foreground
+pm2 start bun --name injekta -- run dev       # background with pm2
+pm2 save                                      # restart on reboot
+```
 
-   This creates the `injections`, `global_settings`, and `admin_actions` tables.
-
-> **Upgrading from an older schema?** If your `injection_date` column was stored as a `DD-MM-YYYY` string, migrate it before restarting:
+> **Upgrading from a very old schema?** If your `injection_date` column was stored as a `DD-MM-YYYY` string, convert it before starting the new version:
 >
 > ```sql
 > ALTER TABLE injections
@@ -80,91 +99,81 @@ bun run prepare   # sets up Husky pre-commit hooks (optional)
 Copy `.env.example` to `.env` and fill in your values:
 
 ```env
-# Discord
+# Required
 BOT_TOKEN=your_discord_bot_token
 CLIENT_ID=your_discord_application_id
-GUILD_ID=your_discord_server_id
-
-# Database
 DATABASE_URL=postgresql://injekta_user:your_secure_password@localhost:5432/injekta_db
 
-# Channels
-DESIGNATED_CHANNEL_ID=channel_id_for_injection_logs_and_reminders
-VERSION_NOTIFY_CHANNEL_ID=channel_id_for_update_alerts  # optional, falls back to DESIGNATED_CHANNEL_ID
-
 # Optional
-BOT_OWNER_ID=your_discord_user_id
+GUILD_ID=your_discord_server_id            # registers commands instantly in this server (dev mode)
+BOT_OWNER_ID=your_discord_user_id          # pinged on hormone test reminders in GUILD_ID; gets the old schedule when upgrading
+VERSION_NOTIFY_CHANNEL_ID=channel_id       # where update alerts go
+NODE_ENV=production                        # register commands globally for every server
 ```
 
-**Timezone:** `/setinjectionschedule` accepts IANA timezone names (e.g. `UTC`, `Europe/London`, `America/New_York`). Invalid values are rejected; the scheduler falls back to UTC.
+- **One server:** set `GUILD_ID`. Commands show up right away in that server.
+- **Many servers / public instance:** set `NODE_ENV=production`. Commands are registered globally. The bot removes the old `GUILD_ID` copies so they don't appear twice.
+- **Upgrading from the single-server version:** keep `GUILD_ID`, `DESIGNATED_CHANNEL_ID`, and `BOT_OWNER_ID` set for the first start. Your existing logs are moved to that server, the channel becomes that server's reminder channel, and the old server-wide schedule becomes `BOT_OWNER_ID`'s personal schedule (reminders now arrive by DM; use `/privacy reminders:channel` for the old behavior). After that, `DESIGNATED_CHANNEL_ID` isn't needed; use `/setchannel`.
 
-## Running the Bot
+**Timezones** use IANA names (e.g. `UTC`, `Europe/London`, `America/New_York`). Invalid values are rejected.
 
-**Development:**
+## First-run checklist
 
-```bash
-bun run dev
-```
+In each server:
 
-**Production (pm2):**
-
-```bash
-npm install -g pm2
-pm2 start bun --name injekta -- run dev
-pm2 save          # auto-restart on server reboot
-pm2 logs injekta  # tail logs
-pm2 stop injekta  # stop
-```
-
-**First-run checklist:**
-
-1. Start the bot.
-2. Run `/setupcheck` in Discord to verify DB connection and channel access.
-3. Run `/setinjectionschedule` (admin) to configure the schedule — reminders and `/nextinjection` won't work until this is done.
-4. Optionally run `/sethormonetest` (admin) to enable E/T lab reminders.
+1. Invite the bot with the `bot` and `applications.commands` scopes.
+2. `/setchannel` (admin): where `/injection` is used and channel reminders go. Optional: without it, people can log anywhere and only DM reminders work.
+3. `/setupcheck` (admin): confirms the database, channel, and schedule.
+4. Members run `/myschedule set` for their own reminders and `/privacy` to see their settings.
 
 ## Updating the Bot
 
-No action is required from end users — everything is stored in PostgreSQL and survives restarts.
-
-On the server:
-
 ```bash
 git pull
-bun install       # only needed if bun.lockb changed
-pm2 restart injekta
+docker compose up -d --build     # Docker
+# or
+bun install && pm2 restart injekta   # manual install
 ```
 
-The scheduler re-reads all settings from the database on startup and picks up exactly where it left off. If a reminder was missed while the bot was offline, a catch-up notice is sent automatically.
-
-**If a future update adds new database columns or tables**, run the relevant `ALTER TABLE` / `CREATE TABLE` SQL against the live database before restarting the bot. Keep `schema.sql` in sync when this happens.
+Database changes are applied automatically on start. The scheduler re-reads everything from the database and sends a catch-up notice for anything missed while it was offline.
 
 ## Available Commands
 
-| Command                                                                                | Description                                    | Who                         |
-| -------------------------------------------------------------------------------------- | ---------------------------------------------- | --------------------------- |
-| `/injection [dose_mg] [medication] [performed_at] [raw_units] [leg]`                   | Log an injection                               | Everyone                    |
-| `/checklogs [user]`                                                                    | View, edit, or delete your last 5 logs         | Everyone (admin for others) |
-| `/setleg <log_id> <leg>`                                                               | Fix which leg a log was saved as               | Everyone (admin for others) |
-| `/nextinjection`                                                                       | Show when the next injection is due            | Everyone                    |
-| `/snooze <hours>`                                                                      | Push the current injection nag back by N hours | Everyone                    |
-| `/stats [user]`                                                                        | Total logs and streak                          | Everyone (admin for others) |
-| `/deletemylog [log_id]`                                                                | Delete your latest log or a specific one by ID | Everyone                    |
-| `/convertunits <units> <concentration_mg_per_ml>`                                      | Convert syringe units to mg                    | Everyone                    |
-| `/help`                                                                                | Show command overview                          | Everyone                    |
-| `/timecheck`                                                                           | Show current time in the configured timezone   | Everyone                    |
-| `/health`                                                                              | Check bot and database status                  | Admin                       |
-| `/setinjectionschedule <day> <time> [timezone] [interval_days] [medication] [dose_mg]` | Configure the global injection schedule        | Admin                       |
-| `/sethormonetest [start_date] [interval_days] [timezone]`                              | Configure hormone test reminders               | Admin                       |
-| `/logfor <user> [dose_mg] [medication] [performed_at] [raw_units] [leg]`               | Log an injection for another user              | Admin                       |
-| `/admindeletelog <user> <log_id>`                                                      | Delete any user's log entry                    | Admin                       |
-| `/updatecheck`                                                                         | Manually check for available git updates       | Admin                       |
-| `/setupcheck`                                                                          | Verify DB connection and channel config        | Admin                       |
+**For everyone** (replies are only visible to you):
+
+| Command                                                              | Description                                       |
+| -------------------------------------------------------------------- | ------------------------------------------------- |
+| `/injection [dose_mg] [medication] [performed_at] [raw_units] [leg]` | Log an injection                                  |
+| `/checklogs`                                                         | View, edit, or delete your last 5 logs            |
+| `/setleg <log_id> <leg>`                                             | Fix which leg a log was saved as                  |
+| `/myschedule set <next> <every_days> [timezone] [medication] [dose]` | Set your own schedule                             |
+| `/myschedule show` / `/myschedule clear`                             | See your schedule / stop reminders                |
+| `/privacy [admin_access] [reminders]`                                | See or change admin access and where reminders go |
+| `/exportmydata`                                                      | Download your data in this server as JSON         |
+| `/deletemydata`                                                      | Delete all your logs and settings in this server  |
+| `/nextinjection`                                                     | Time until your next injection                    |
+| `/snooze <hours>`                                                    | Push your injection nag back                      |
+| `/stats`                                                             | Total logs and streak                             |
+| `/deletemylog [log_id]`                                              | Delete your latest log or a specific one          |
+| `/convertunits <units> <concentration_mg_per_ml>`                    | Convert syringe units to mg                       |
+| `/timecheck`                                                         | Current time in your timezone                     |
+| `/help`                                                              | Walkthrough                                       |
+
+**For admins:**
+
+| Command                                                   | Description                                    |
+| --------------------------------------------------------- | ---------------------------------------------- |
+| `/setchannel <channel>`                                   | Channel for `/injection` and channel reminders |
+| `/sethormonetest [start_date] [interval_days] [timezone]` | Hormone test reminders                         |
+| `/checklogs user:` · `/stats user:` · `/setleg`           | Only for members who allowed admin access      |
+| `/logfor <user> ...` · `/admindeletelog <user> <log_id>`  | Only for members who allowed admin access      |
+| `/setupcheck` · `/health` · `/updatecheck`                | Setup check, status, update check              |
 
 ## Development
 
 ```bash
 bun run lint            # ESLint
+bun run test            # Jest
 bun run prettier-check  # check formatting
 bun run prettier-write  # apply formatting
 ```
@@ -175,4 +184,4 @@ Git hooks (Husky + lint-staged) run ESLint and Prettier automatically on commit.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+PolyForm Noncommercial 1.0.0, see [LICENSE](LICENSE). Commercial use needs a separate license.

@@ -4,7 +4,7 @@ import { getLogById, recordAdminAction, updateLog } from '../database';
 import logger from '../logger';
 import { formatTimestampForDisplay } from '../time';
 import { getOptionLeg, getOptionNumber } from '../utils/options';
-import { hasAdminPermission } from '../utils/permissions';
+import { canAccessUserData, guildIdOf } from '../utils/access';
 
 export async function handleSetLegCommand(interaction: CommandInteraction) {
   const logId = getOptionNumber(interaction, 'log_id');
@@ -20,10 +20,15 @@ export async function handleSetLegCommand(interaction: CommandInteraction) {
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+  const guildId = guildIdOf(interaction);
   const record = await getLogById(logId);
   const isOwner = record?.user_id === interaction.user.id;
-  // Same reply for "missing" and "not yours" so IDs can't be probed
-  if (!record || (!isOwner && !hasAdminPermission(interaction))) {
+  // Same reply for "missing", "other server" and "private" so IDs can't be probed
+  if (
+    !record ||
+    record.guild_id !== guildId ||
+    !(await canAccessUserData(interaction, record.user_id))
+  ) {
     await interaction.editReply(
       `Log #${logId} not found, or it isn't yours. Check the ID with /checklogs.`,
     );
@@ -41,11 +46,10 @@ export async function handleSetLegCommand(interaction: CommandInteraction) {
     return;
   }
 
-  logger.info(
-    `${interaction.user.tag} changed log #${logId} leg ${record.leg} -> ${leg}.`,
-  );
+  logger.info(`${interaction.user.tag} changed the leg on log #${logId}.`);
   if (!isOwner) {
     await recordAdminAction({
+      guildId,
       adminUserId: interaction.user.id,
       targetUserId: record.user_id,
       action: 'setleg',

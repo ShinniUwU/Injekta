@@ -5,15 +5,14 @@ import { refreshCommands } from './commands';
 import { handleInjectionCommand } from './handlers/injectionCommand';
 import { handleChecklogsCommand } from './handlers/checklogsCommand';
 import { handleNextInjectionCommand } from './handlers/nextInjectionCommand';
-import { handleSetInjectionScheduleCommand } from './handlers/setInjectionScheduleCommand';
 import { handleStatsCommand } from './handlers/statsCommand';
 import { handleLogforCommand } from './handlers/logforCommand';
 // Import new handlers
 import { handleAdminDeleteLogCommand } from './handlers/adminDeleteLogCommand';
 import { handleDeleteMyLogCommand } from './handlers/deleteMyLogCommand';
-import { initializeScheduler, rescheduleJobs } from './scheduler';
+import { initializeScheduler } from './scheduler';
 import logger from './logger';
-import { closeDbPool } from './database';
+import { closeDbPool, migrate } from './database';
 import { handleConvertUnitsCommand } from './handlers/convertUnitsCommand';
 import { handleSetHormoneTestCommand } from './handlers/setHormoneTestCommand';
 import { handleHelpCommand } from './handlers/helpCommand';
@@ -23,6 +22,11 @@ import { handleTimeCheckCommand } from './handlers/timeCheckCommand';
 import { handleHealthCommand } from './handlers/healthCommand';
 import { handleSnoozeCommand } from './handlers/snoozeCommand';
 import { handleSetLegCommand } from './handlers/setLegCommand';
+import { handleMyScheduleCommand } from './handlers/myScheduleCommand';
+import { handlePrivacyCommand } from './handlers/privacyCommand';
+import { handleSetChannelCommand } from './handlers/setChannelCommand';
+import { handleDeleteMyDataCommand } from './handlers/deleteMyDataCommand';
+import { handleExportMyDataCommand } from './handlers/exportMyDataCommand';
 import { notifyIfOutdated } from './versionCheck';
 
 const client = new Client({
@@ -64,6 +68,12 @@ client.once('ready', async () => {
 
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
+  if (!interaction.inGuild()) {
+    await interaction
+      .reply({ content: 'Injekta commands only work inside a server.' })
+      .catch((e) => logger.error('Failed to reply outside a server', e));
+    return;
+  }
 
   try {
     switch (interaction.commandName) {
@@ -75,10 +85,6 @@ client.on('interactionCreate', async (interaction) => {
         break;
       case 'nextinjection':
         await handleNextInjectionCommand(interaction);
-        break;
-      case 'setinjectionschedule':
-        // Ensure rescheduleJobs is passed correctly
-        await handleSetInjectionScheduleCommand(interaction, rescheduleJobs);
         break;
       case 'stats':
         await handleStatsCommand(interaction);
@@ -117,6 +123,21 @@ client.on('interactionCreate', async (interaction) => {
       case 'setleg':
         await handleSetLegCommand(interaction);
         break;
+      case 'myschedule':
+        await handleMyScheduleCommand(interaction);
+        break;
+      case 'privacy':
+        await handlePrivacyCommand(interaction);
+        break;
+      case 'setchannel':
+        await handleSetChannelCommand(interaction);
+        break;
+      case 'exportmydata':
+        await handleExportMyDataCommand(interaction);
+        break;
+      case 'deletemydata':
+        await handleDeleteMyDataCommand(interaction);
+        break;
       case 'snooze':
         await handleSnoozeCommand(interaction);
         break;
@@ -149,6 +170,16 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 });
+
+try {
+  await migrate();
+  logger.info('Database schema is up to date.');
+} catch (error) {
+  logger.error('Database migration failed; refusing to start.', {
+    migrateError: error,
+  });
+  process.exit(1);
+}
 
 client.login(config.botToken).catch((error) => {
   logger.error('Failed to login to Discord:', { loginError: error });

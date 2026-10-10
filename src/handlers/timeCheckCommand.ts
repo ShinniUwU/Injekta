@@ -1,16 +1,15 @@
 import type { CommandInteraction } from 'discord.js';
 import { MessageFlags } from 'discord.js';
 import { DateTime } from 'luxon';
-import { getGlobalSettings } from '../database';
+import { guildIdOf } from '../utils/access';
+import { getUserDefaults } from '../utils/defaults';
 
 export async function handleTimeCheckCommand(interaction: CommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const settings = await getGlobalSettings();
-  const tz =
-    settings?.timezone && settings.timezone.trim() !== ''
-      ? settings.timezone
-      : 'UTC';
+  const tz = (
+    await getUserDefaults(guildIdOf(interaction), interaction.user.id)
+  ).timezone;
 
   const serverNow = DateTime.now();
   const configuredNow = serverNow.setZone(tz);

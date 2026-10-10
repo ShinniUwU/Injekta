@@ -8,7 +8,7 @@ import {
   cronDayFromDateTime,
   parseUserDateTimeInput,
 } from '../src/time';
-import type { GlobalSettings } from '../src/database';
+import type { ScheduleLike } from '../src/time';
 
 describe('isValidTimeZone', () => {
   it('accepts known IANA zones', () => {
@@ -48,20 +48,10 @@ describe('getAnchorDateTime', () => {
 
 describe('getNextInjectionDateTime', () => {
   const now = DateTime.fromISO('2026-08-04T10:00:00', { zone: 'utc' });
-  const baseSettings: GlobalSettings = {
-    id: 1,
-    injection_day: 3,
-    injection_time: '09:00',
+  const baseSettings: ScheduleLike = {
     timezone: 'UTC',
     interval_days: 7,
     start_time: '2026-07-01T09:00:00.000Z',
-    medication: null,
-    dose_mg: null,
-    test_start_time: null,
-    test_interval_days: null,
-    test_timezone: null,
-    last_run_at: null,
-    test_last_run_at: null,
   };
 
   it('advances a past anchor by whole intervals to land after now', () => {

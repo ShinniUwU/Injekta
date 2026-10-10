@@ -5,6 +5,11 @@ import { deleteLogById, recordAdminAction } from '../database';
 import logger from '../logger';
 import { formatTimestampForDisplay } from '../time';
 import { hasAdminPermission } from '../utils/permissions';
+import {
+  canAccessUserData,
+  guildIdOf,
+  PRIVATE_LOGS_MESSAGE,
+} from '../utils/access';
 
 export async function handleAdminDeleteLogCommand(
   interaction: CommandInteraction,
@@ -45,15 +50,25 @@ export async function handleAdminDeleteLogCommand(
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+  const guildId = guildIdOf(interaction);
+  if (!(await canAccessUserData(interaction, targetUser.id))) {
+    await interaction.editReply(PRIVATE_LOGS_MESSAGE);
+    return;
+  }
+
   // Call delete function
   // Only delete if the log belongs to the user the admin picked
-  const result = await deleteLogById(logId, targetUser.id);
+  const result = await deleteLogById(logId, {
+    guildId,
+    userId: targetUser.id,
+  });
 
   if (result.success && result.deletedRecord) {
     logger.info(
-      `Admin ${interaction.user.tag} deleted log ID ${logId} (belonging to ${result.deletedRecord.user_id}) for user ${targetUser.tag}.`,
+      `Admin ${interaction.user.tag} deleted log ID ${logId} for user ${targetUser.tag}.`,
     );
     await recordAdminAction({
+      guildId,
       adminUserId: interaction.user.id,
       targetUserId: targetUser.id,
       action: 'admindeletelog',

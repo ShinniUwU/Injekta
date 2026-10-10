@@ -14,29 +14,23 @@ function getEnvVariable(key: string, required = true): string {
   return value || ''; // Return empty string if optional and not set
 }
 
-const designatedChannelId = getEnvVariable('DESIGNATED_CHANNEL_ID'); // Add this to your .env file!
+// Optional: only used to move data from the old single-server setup into
+// GUILD_ID's per-server settings. New servers use /setchannel instead.
+const designatedChannelId = getEnvVariable('DESIGNATED_CHANNEL_ID', false);
 const versionNotifyChannelId =
   getEnvVariable('VERSION_NOTIFY_CHANNEL_ID', false) || designatedChannelId;
 
 export const config = {
   botToken: getEnvVariable('BOT_TOKEN'),
   clientId: getEnvVariable('CLIENT_ID'),
-  guildId: getEnvVariable('GUILD_ID'),
+  // Optional in production (global commands); used for dev command registration
+  guildId: getEnvVariable('GUILD_ID', false),
   // Replace Supabase vars with DATABASE_URL
   databaseUrl: getEnvVariable('DATABASE_URL'), // e.g., postgresql://user:password@host:port/database
   designatedChannelId,
   versionNotifyChannelId,
   botOwnerId: getEnvVariable('BOT_OWNER_ID', false), // Optional
 };
-
-// Validate DESIGNATED_CHANNEL_ID specifically
-if (!config.designatedChannelId) {
-  logger.warn(
-    'DESIGNATED_CHANNEL_ID is not set in .env. Some features might require it.',
-  );
-  // Depending on strictness, you might want to exit here too if it's absolutely required.
-  // process.exit(1);
-}
 
 // Validate Database URL format (basic check)
 try {

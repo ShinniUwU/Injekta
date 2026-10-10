@@ -1,5 +1,13 @@
 import { DateTime, IANAZone } from 'luxon';
-import type { GlobalSettings } from './database';
+
+// Anything with an anchor and an interval, like a user's schedule.
+export interface ScheduleLike {
+  timezone: string;
+  interval_days: number | string | null;
+  start_time: string | null;
+  injection_day?: number | null;
+  injection_time?: string | null;
+}
 
 const supportedZones =
   typeof Intl.supportedValuesOf === 'function'
@@ -69,7 +77,7 @@ export function getAnchorDateTime(
 }
 
 export function getNextInjectionDateTime(
-  settings: GlobalSettings,
+  settings: ScheduleLike,
   now: DateTime = DateTime.now(),
 ): DateTime | null {
   const timezone = isValidTimeZone(settings.timezone)
@@ -92,7 +100,12 @@ export function getNextInjectionDateTime(
   }
 
   // If still invalid, recompute an anchor based on day/time/timezone
-  if (!anchor.isValid) {
+  if (
+    !anchor.isValid &&
+    settings.injection_day !== null &&
+    settings.injection_day !== undefined &&
+    settings.injection_time
+  ) {
     const recomputed = getAnchorDateTime(
       settings.injection_day,
       settings.injection_time,

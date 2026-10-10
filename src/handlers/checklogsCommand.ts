@@ -19,7 +19,6 @@ import {
 import { DateTime } from 'luxon';
 import {
   deleteLogById,
-  getGlobalSettings,
   getLogById,
   getNextLeg,
   getRecentLogs,
@@ -29,7 +28,12 @@ import {
 import type { InjectionRecord } from '../database';
 import logger from '../logger';
 import { formatTimestampForDisplay, parseUserDateTimeInput } from '../time';
-import { hasAdminPermission } from '../utils/permissions';
+import {
+  canAccessUserData,
+  guildIdOf,
+  PRIVATE_LOGS_MESSAGE,
+} from '../utils/access';
+import { getUserDefaults } from '../utils/defaults';
 
 const EDIT_SESSION_MS = 5 * 60 * 1000;
 
@@ -37,17 +41,14 @@ function buildLogsEmbed(
   user: User,
   records: InjectionRecord[],
   locale: string,
-  canEdit: boolean,
   notice?: string,
 ) {
   const embed = new EmbedBuilder()
     .setTitle(`${user.username}'s Last 5 Injection Logs`)
     .setDescription(
-      `${
-        canEdit
-          ? 'Newest to oldest. Pick a log below to flip its leg, edit it, or delete it.'
-          : 'Newest to oldest.'
-      }${notice ? `\n\n${notice}` : ''}`,
+      `Newest to oldest. Pick a log below to flip its leg, edit it, or delete it.${
+        notice ? `\n\n${notice}` : ''
+      }`,
     )
     .setColor(0x3498db)
     .setThumbnail(
@@ -159,42 +160,25 @@ function parseOptionalNumber(value: string): number | null | 'invalid' {
 export async function handleChecklogsCommand(interaction: CommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const userOption = interaction.options.get('user');
-  const targetUserFromOption = userOption?.user;
-  const isAdmin = hasAdminPermission(interaction);
-
-  let userToCheck: User;
-
-  if (targetUserFromOption) {
-    if (targetUserFromOption.id !== interaction.user.id && !isAdmin) {
-      await interaction.editReply({
-        content:
-          'You need Administrator permissions to check logs for other users.',
-      });
-      return;
-    }
-    userToCheck = targetUserFromOption;
-  } else {
-    userToCheck = interaction.user;
-  }
+  const guildId = guildIdOf(interaction);
+  const userToCheck: User =
+    interaction.options.get('user')?.user ?? interaction.user;
   const ownerId = userToCheck.id;
   const actingForSomeoneElse = ownerId !== interaction.user.id;
-  const canEdit = !actingForSomeoneElse || isAdmin;
   const locale = interaction.locale ?? 'en-US';
 
-  let records: InjectionRecord[] = await getRecentLogs(ownerId, 5);
-
-  if (records.length === 0) {
-    await interaction.editReply(
-      `No injection logs yet for ${userToCheck.username}. Run /injection in the designated channel when you are ready to start tracking.`,
-    );
+  // Checked before anything else so the reply doesn't reveal whether they have logs
+  if (!(await canAccessUserData(interaction, ownerId))) {
+    await interaction.editReply(PRIVATE_LOGS_MESSAGE);
     return;
   }
 
-  if (!canEdit) {
-    await interaction.editReply({
-      embeds: [buildLogsEmbed(userToCheck, records, locale, false)],
-    });
+  let records: InjectionRecord[] = await getRecentLogs(guildId, ownerId, 5);
+
+  if (records.length === 0) {
+    await interaction.editReply(
+      `No injection logs yet for ${userToCheck.username} in this server. Run /injection when you are ready to start tracking.`,
+    );
     return;
   }
 
@@ -211,7 +195,7 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
   let confirmingDelete = false;
 
   const render = (notice?: string) => ({
-    embeds: [buildLogsEmbed(userToCheck, records, locale, true, notice)],
+    embeds: [buildLogsEmbed(userToCheck, records, locale, notice)],
     components: records.length
       ? buildComponents(records, locale, ids, selected, confirmingDelete)
       : [],
@@ -220,6 +204,7 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
   const audit = async (action: string, logId: number, details: string) => {
     if (!actingForSomeoneElse) return;
     await recordAdminAction({
+      guildId,
       adminUserId: interaction.user.id,
       targetUserId: ownerId,
       action,
@@ -229,7 +214,7 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
   };
 
   const refresh = async () => {
-    records = await getRecentLogs(ownerId, 5);
+    records = await getRecentLogs(guildId, ownerId, 5);
     selected = selected
       ? records.find((r) => r.id === selected?.id) ?? null
       : null;
@@ -241,7 +226,9 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
   const loadSelected = async () => {
     if (!selected) return null;
     const fresh = await getLogById(selected.id);
-    return fresh && fresh.user_id === ownerId ? fresh : null;
+    return fresh && fresh.user_id === ownerId && fresh.guild_id === guildId
+      ? fresh
+      : null;
   };
 
   const message = (await interaction.editReply(render())) as Message;
@@ -296,7 +283,10 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
       }
 
       if (i.customId === ids.confirmDel) {
-        const result = await deleteLogById(current.id, ownerId);
+        const result = await deleteLogById(current.id, {
+          guildId,
+          userId: ownerId,
+        });
         if (result.success) {
           await audit('deletelog', current.id, `Deleted ${current.leg} leg`);
         }
@@ -314,7 +304,7 @@ export async function handleChecklogsCommand(interaction: CommandInteraction) {
       }
 
       if (i.customId === ids.edit) {
-        const tz = (await getGlobalSettings())?.timezone ?? 'UTC';
+        const tz = (await getUserDefaults(guildId, ownerId)).timezone;
         const performed = DateTime.fromISO(
           current.performed_at ?? current.injection_date,
         ).setZone(tz);

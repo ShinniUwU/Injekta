@@ -1,7 +1,8 @@
 // src/handlers/nextInjectionCommand.ts
 import type { CommandInteraction } from 'discord.js'; // Import type
 import { EmbedBuilder, MessageFlags } from 'discord.js'; // Import MessageFlags
-import { getGlobalSettings } from '../database';
+import { getUserSchedule } from '../database';
+import { guildIdOf } from '../utils/access';
 import logger from '../logger'; // Import logger
 import { DateTime } from 'luxon';
 import {
@@ -10,7 +11,6 @@ import {
   formatTimestampForDisplay,
   getNextInjectionDateTime,
   isValidTimeZone,
-  getAnchorDateTime,
 } from '../time';
 
 export async function handleNextInjectionCommand(
@@ -20,10 +20,11 @@ export async function handleNextInjectionCommand(
   // Use flags for deferReply
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const settings = await getGlobalSettings();
+  const guildId = guildIdOf(interaction);
+  const settings = await getUserSchedule(guildId, interaction.user.id);
   if (!settings) {
     await interaction.editReply(
-      'Global injection schedule not set. Please contact an admin.',
+      'No schedule yet. Set one with `/myschedule set`.',
     );
     return;
   }
@@ -32,19 +33,6 @@ export async function handleNextInjectionCommand(
     const timezone = isValidTimeZone(settings.timezone)
       ? settings.timezone
       : 'UTC';
-    if (!settings.start_time) {
-      const anchor = getAnchorDateTime(
-        settings.injection_day,
-        settings.injection_time,
-        timezone,
-      );
-      if (anchor) {
-        const iso = anchor.toISO();
-        if (iso) {
-          settings.start_time = iso;
-        }
-      }
-    }
     const now = DateTime.now().setZone(timezone);
     const nextInjection = getNextInjectionDateTime(settings, now);
 
@@ -90,7 +78,7 @@ export async function handleNextInjectionCommand(
 until the next injection.
 
 Scheduled for: **${nextInjectionStr}**
-(Based on schedule: every ${settings.interval_days} day(s), first anchor ${anchorLabel})
+(Based on your schedule: every ${settings.interval_days} day(s), first anchor ${anchorLabel})
 Medication: **${medLabel}**
 Dose: **${doseLabel}**
 Timezone: **${timezone}**

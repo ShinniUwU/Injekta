@@ -14,6 +14,7 @@ import { awaitConfirmation } from '../utils/awaitConfirm';
 import logger from '../logger';
 import { formatTimestampForDisplay } from '../time';
 import { getOptionNumber } from '../utils/options';
+import { guildIdOf } from '../utils/access';
 
 export async function handleDeleteMyLogCommand(
   interaction: CommandInteraction,
@@ -106,10 +107,14 @@ export async function handleDeleteMyLogCommand(
     let result: { success: boolean; deletedRecord?: InjectionRecord } = {
       success: false,
     };
+    const guildId = guildIdOf(interaction);
     if (operationType === 'specific' && logIdToDelete) {
-      result = await deleteLogById(logIdToDelete, interaction.user.id);
+      result = await deleteLogById(logIdToDelete, {
+        guildId,
+        userId: interaction.user.id,
+      });
     } else if (operationType === 'latest') {
-      result = await deleteLatestLogForUser(interaction.user.id);
+      result = await deleteLatestLogForUser(guildId, interaction.user.id);
     }
 
     if (result.success && result.deletedRecord) {

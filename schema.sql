@@ -1,57 +1,68 @@
 -- schema.sql
--- Run this script against your PostgreSQL database to create the necessary tables.
+-- The bot runs this file on every startup, so every statement must be idempotent.
+-- You can also apply it by hand: psql -d injekta_db -f schema.sql
 
--- Create the injections table
+-- Injection logs, kept separately per server (guild_id)
 CREATE TABLE IF NOT EXISTS injections (
-    id SERIAL PRIMARY KEY,                      -- Auto-incrementing integer ID
+    id SERIAL PRIMARY KEY,
+    guild_id VARCHAR(32),                       -- Discord server the log belongs to
     user_id VARCHAR(255) NOT NULL,              -- Discord User ID
-    leg VARCHAR(10) NOT NULL CHECK (leg IN ('Right', 'Left')), -- Ensures only 'Right' or 'Left'
-    injection_date TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, -- Timestamp with timezone for the injection
+    leg VARCHAR(10) NOT NULL CHECK (leg IN ('Right', 'Left')),
+    injection_date TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     performed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, -- When the injection actually happened
-    medication VARCHAR(100),                    -- Medication name (e.g., estradiol, progesterone)
-    dose_mg NUMERIC(10,2),                      -- Dose in mg for this injection
-    raw_units INT,                              -- Optional raw syringe units as logged
+    medication VARCHAR(100),
+    dose_mg NUMERIC(10,2),
+    raw_units INT,
     created_by_admin_id VARCHAR(255),           -- Admin who logged on behalf of a user
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP -- Timestamp with timezone for sorting
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Add indexes for faster lookups
-CREATE INDEX IF NOT EXISTS idx_injections_user_id ON injections(user_id);
-CREATE INDEX IF NOT EXISTS idx_injections_created_at ON injections(created_at);
-CREATE INDEX IF NOT EXISTS idx_injections_performed_at ON injections(performed_at);
-CREATE INDEX IF NOT EXISTS idx_injections_medication ON injections(medication);
+-- Columns added after the first release
+ALTER TABLE injections ADD COLUMN IF NOT EXISTS guild_id VARCHAR(32);
+ALTER TABLE injections ADD COLUMN IF NOT EXISTS performed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE injections ADD COLUMN IF NOT EXISTS medication VARCHAR(100);
+ALTER TABLE injections ADD COLUMN IF NOT EXISTS dose_mg NUMERIC(10,2);
+ALTER TABLE injections ADD COLUMN IF NOT EXISTS raw_units INT;
+ALTER TABLE injections ADD COLUMN IF NOT EXISTS created_by_admin_id VARCHAR(255);
 
--- Create the global settings table
-CREATE TABLE IF NOT EXISTS global_settings (
-    id INT PRIMARY KEY CHECK (id = 1),          -- Enforce only one row with id = 1
-    injection_day INT NOT NULL CHECK (injection_day >= 0 AND injection_day <= 6), -- 0 (Sun) to 6 (Sat)
-    injection_time VARCHAR(5) NOT NULL CHECK (injection_time ~ '^[0-2]\d:[0-5]\d$'), -- HH:MM format
-    timezone VARCHAR(100) NOT NULL DEFAULT 'UTC', -- IANA timezone name (e.g., 'UTC', 'America/New_York')
-    interval_days NUMERIC(6,2) NOT NULL DEFAULT 7, -- Flexible cadence (e.g., 3.5 days, 10 days, 30 days)
-    start_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, -- Anchor for interval-based scheduling
-    medication VARCHAR(100) DEFAULT 'Injection', -- Medication name for reminders
-    dose_mg NUMERIC(10,2), -- Default dose in mg for reminders
-    test_start_time TIMESTAMPTZ,              -- Anchor for hormone test reminders
-    test_interval_days NUMERIC(6,2) DEFAULT 30, -- Interval for hormone test reminders (e.g., 30 days)
-    test_timezone VARCHAR(100) DEFAULT 'UTC', -- Timezone for hormone test reminders
-    last_run_at TIMESTAMPTZ,                 -- Scheduler last run (injection reminders)
-    test_last_run_at TIMESTAMPTZ             -- Scheduler last run (test reminders)
+CREATE INDEX IF NOT EXISTS idx_injections_guild_user ON injections(guild_id, user_id, performed_at DESC);
+
+-- Per-server settings: reminder channel and hormone test reminders
+CREATE TABLE IF NOT EXISTS guild_settings (
+    guild_id VARCHAR(32) PRIMARY KEY,
+    channel_id VARCHAR(32),                     -- Channel for /injection and channel reminders
+    test_start_time TIMESTAMPTZ,
+    test_interval_days NUMERIC(6,2),
+    test_timezone VARCHAR(100),
+    test_last_run_at TIMESTAMPTZ
 );
 
--- Optional: Insert a default settings row if it doesn't exist.
--- The bot's 'setinjectionschedule' command should handle creating/updating this row.
--- You might run this manually once after creating the table if needed.
--- INSERT INTO global_settings (id, injection_day, injection_time, timezone)
--- VALUES (1, 0, '09:00', 'UTC')
--- ON CONFLICT (id) DO NOTHING;
+-- A user's schedule in a server. Reminders only go to people who set one.
+CREATE TABLE IF NOT EXISTS user_schedules (
+    guild_id VARCHAR(32) NOT NULL,
+    user_id VARCHAR(32) NOT NULL,
+    start_time TIMESTAMPTZ NOT NULL,
+    interval_days NUMERIC(6,2) NOT NULL,
+    timezone VARCHAR(100) NOT NULL DEFAULT 'UTC',
+    medication VARCHAR(100),
+    dose_mg NUMERIC(10,2),
+    last_run_at TIMESTAMPTZ,
+    PRIMARY KEY (guild_id, user_id)
+);
 
--- Add comment explaining the schema setup
-COMMENT ON TABLE injections IS 'Stores individual injection records for users.';
-COMMENT ON TABLE global_settings IS 'Stores the global injection schedule settings (only row with id=1 is used).';
+-- Privacy choices per user per server. No row means the private defaults.
+CREATE TABLE IF NOT EXISTS user_settings (
+    guild_id VARCHAR(32) NOT NULL,
+    user_id VARCHAR(32) NOT NULL,
+    share_with_admins BOOLEAN NOT NULL DEFAULT FALSE,
+    remind_via VARCHAR(10) NOT NULL DEFAULT 'dm' CHECK (remind_via IN ('dm', 'channel')),
+    PRIMARY KEY (guild_id, user_id)
+);
 
 -- Admin action audit log
 CREATE TABLE IF NOT EXISTS admin_actions (
     id SERIAL PRIMARY KEY,
+    guild_id VARCHAR(32),
     admin_user_id VARCHAR(255) NOT NULL,
     target_user_id VARCHAR(255),
     action VARCHAR(50) NOT NULL,
@@ -59,29 +70,11 @@ CREATE TABLE IF NOT EXISTS admin_actions (
     details TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE admin_actions ADD COLUMN IF NOT EXISTS guild_id VARCHAR(32);
 
 CREATE INDEX IF NOT EXISTS idx_admin_actions_admin ON admin_actions(admin_user_id);
 
--- Migration hint (run manually on existing DB):
--- ALTER TABLE injections
---   ALTER COLUMN injection_date TYPE TIMESTAMPTZ USING to_timestamp(injection_date, 'DD-MM-YYYY'),
---   ALTER COLUMN injection_date SET DEFAULT CURRENT_TIMESTAMP,
---   ADD COLUMN IF NOT EXISTS performed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
---   ADD COLUMN IF NOT EXISTS medication VARCHAR(100),
---   ADD COLUMN IF NOT EXISTS dose_mg NUMERIC(10,2),
---   ADD COLUMN IF NOT EXISTS raw_units INT,
---   ADD COLUMN IF NOT EXISTS created_by_admin_id VARCHAR(255);
---
--- ALTER TABLE global_settings
---   ADD COLUMN IF NOT EXISTS interval_days NUMERIC(6,2) NOT NULL DEFAULT 7,
---   ADD COLUMN IF NOT EXISTS start_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
---   ADD COLUMN IF NOT EXISTS medication VARCHAR(100) DEFAULT 'Injection',
---   ADD COLUMN IF NOT EXISTS dose_mg NUMERIC(10,2),
---   ADD COLUMN IF NOT EXISTS test_start_time TIMESTAMPTZ,
---   ADD COLUMN IF NOT EXISTS test_interval_days NUMERIC(6,2) DEFAULT 30,
---   ADD COLUMN IF NOT EXISTS test_timezone VARCHAR(100) DEFAULT 'UTC',
---   ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMPTZ,
---   ADD COLUMN IF NOT EXISTS test_last_run_at TIMESTAMPTZ;
-
--- Log completion
-\echo 'Schema setup script completed.'
+COMMENT ON TABLE injections IS 'Injection logs per user per server (last 5 kept).';
+COMMENT ON TABLE guild_settings IS 'Per-server reminder channel and hormone test reminders.';
+COMMENT ON TABLE user_schedules IS 'Personal injection schedules.';
+COMMENT ON TABLE user_settings IS 'Per-user privacy choices. Defaults are private.';
