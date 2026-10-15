@@ -1,0 +1,36 @@
+name: Bug report
+description: Something isn't working
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Don't post personal health info (doses, medication, real logs). Security problems go through the Security tab, not here.
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: Which slash command or feature?
+      placeholder: /injection
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
